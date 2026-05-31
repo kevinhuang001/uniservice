@@ -20,7 +20,7 @@ Install scripts:
 ### macOS
 
 ```bash
-./install-macos.sh
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | bash
 ```
 
 - non-root: installs to `~/.local/bin/` and writes `~/.profile`
@@ -35,7 +35,7 @@ uniservice --help
 ### Linux
 
 ```bash
-./install-linux.sh
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | bash
 ```
 
 Same behavior as macOS.
@@ -45,7 +45,7 @@ Same behavior as macOS.
 Run in PowerShell:
 
 ```powershell
-.\install-windows.ps1
+iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
 ```
 
 It installs to `%LOCALAPPDATA%\uniservice\bin\` and updates PATH (profile + user PATH). Reopen terminal to take effect.

@@ -8,7 +8,6 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-root_dir="$(cd "$(dirname "$0")" && pwd)"
 files=(
   "uniservice"
   "utils.py"
@@ -18,12 +17,49 @@ files=(
   "windows_backend.py"
 )
 
-for f in "${files[@]}"; do
-  if [[ ! -f "${root_dir}/${f}" ]]; then
-    echo "File not found: ${root_dir}/${f}" 1>&2
+script_dir=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+root_dir="$script_dir"
+need_download=false
+if [[ -z "$root_dir" ]]; then
+  need_download=true
+else
+  for f in "${files[@]}"; do
+    if [[ ! -f "${root_dir}/${f}" ]]; then
+      need_download=true
+      break
+    fi
+  done
+fi
+
+if [[ "$need_download" == "true" ]]; then
+  repo_raw_base="${UNISERVICE_REPO_RAW_BASE:-https://raw.githubusercontent.com/kevinhuang001/uniservice/main}"
+  if command -v curl >/dev/null 2>&1; then
+    downloader="curl"
+  elif command -v wget >/dev/null 2>&1; then
+    downloader="wget"
+  else
+    echo "Neither curl nor wget is installed. Please install one of them first." 1>&2
     exit 1
   fi
-done
+
+  tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t uniservice)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  root_dir="$tmp_dir"
+
+  for f in "${files[@]}"; do
+    url="${repo_raw_base}/${f}"
+    dst="${root_dir}/${f}"
+    if [[ "$downloader" == "curl" ]]; then
+      curl -fsSL "$url" -o "$dst"
+    else
+      wget -qO "$dst" "$url"
+    fi
+  done
+fi
 
 chmod +x "${root_dir}/uniservice"
 

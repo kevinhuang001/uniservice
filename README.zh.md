@@ -20,7 +20,7 @@
 ### macOS
 
 ```bash
-./install-macos.sh
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | bash
 ```
 
 - 非 root：安装到 `~/.local/bin/`，并写入 `~/.profile`
@@ -35,7 +35,7 @@ uniservice --help
 ### Linux
 
 ```bash
-./install-linux.sh
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | bash
 ```
 
 规则同 macOS。
@@ -45,7 +45,7 @@ uniservice --help
 PowerShell 执行：
 
 ```powershell
-.\install-windows.ps1
+iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
 ```
 
 安装到 `%LOCALAPPDATA%\uniservice\bin\`，并更新 PATH（profile + 用户级 PATH）。重开终端生效。

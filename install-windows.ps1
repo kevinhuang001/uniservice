@@ -8,7 +8,7 @@ function Show-InstallHint {
   throw "Python 3 is required."
 }
 
-$root = $PSScriptRoot
+$repoRawBase = if ($env:UNISERVICE_REPO_RAW_BASE) { $env:UNISERVICE_REPO_RAW_BASE } else { 'https://raw.githubusercontent.com/kevinhuang001/uniservice/main' }
 $files = @(
   'uniservice',
   'utils.py',
@@ -17,12 +17,38 @@ $files = @(
   'mac_backend.py',
   'windows_backend.py'
 )
-foreach ($f in $files) {
-  $p = Join-Path $root $f
-  if (-not (Test-Path -LiteralPath $p)) {
-    throw "File not found: $p"
+
+$root = $PSScriptRoot
+$needDownload = $true
+if (-not [string]::IsNullOrWhiteSpace($root)) {
+  $needDownload = $false
+  foreach ($f in $files) {
+    $p = Join-Path $root $f
+    if (-not (Test-Path -LiteralPath $p)) {
+      $needDownload = $true
+      break
+    }
   }
 }
+
+$tmpRoot = $null
+try {
+  if ($needDownload) {
+    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("uniservice-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+    $root = $tmpRoot
+
+    foreach ($f in $files) {
+      $url = "$repoRawBase/$f"
+      $dst = Join-Path $root $f
+      $params = @{
+        Uri     = $url
+        OutFile = $dst
+      }
+      if ($PSVersionTable.PSVersion.Major -lt 6) { $params.UseBasicParsing = $true }
+      Invoke-WebRequest @params | Out-Null
+    }
+  }
 
 $py = Get-Command python -ErrorAction SilentlyContinue
 $py3 = Get-Command py -ErrorAction SilentlyContinue
@@ -99,3 +125,8 @@ if ($existing -notlike '*uniservice\bin*') {
 
 Write-Host "OK: Installed to $installDir"
 Write-Host "Hint: Reopen PowerShell/CMD, then run: uniservice"
+} finally {
+  if ($tmpRoot -and (Test-Path -LiteralPath $tmpRoot)) {
+    Remove-Item -Recurse -Force -LiteralPath $tmpRoot
+  }
+}
