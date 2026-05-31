@@ -1,6 +1,11 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+try {
+  $current = [Net.ServicePointManager]::SecurityProtocol
+  [Net.ServicePointManager]::SecurityProtocol = $current -bor [Net.SecurityProtocolType]::Tls12
+} catch {}
+
 function Show-InstallHint {
   Write-Host "Python 3 is not installed. Please install it first:" -ForegroundColor Yellow
   Write-Host "  - https://www.python.org/downloads/windows/"

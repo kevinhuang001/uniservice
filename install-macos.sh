@@ -18,9 +18,17 @@ files=(
 )
 
 script_dir=""
-if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fi
+script_source="${BASH_SOURCE[0]:-}"
+case "$script_source" in
+  ""|"-"|bash|/dev/fd/*|/proc/self/fd/*|/dev/stdin)
+    script_dir=""
+    ;;
+  *)
+    if [[ -f "$script_source" ]]; then
+      script_dir="$(cd "$(dirname "$script_source")" && pwd)"
+    fi
+    ;;
+esac
 
 root_dir="$script_dir"
 need_download=false
