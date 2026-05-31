@@ -113,7 +113,7 @@ class LinuxBackend(Backend):
         base = self._systemctl()
         run(base + ["daemon-reload"])
         run(base + ["disable", unit_filename(name)])
-        run(base + ["reset-failed", unit_filename(name)], check=False)
+        run(base + ["reset-failed", unit_filename(name)], check=False, capture=True)
 
     def start(self, name: str) -> None:
         logger.info("linux start name=%s", name)

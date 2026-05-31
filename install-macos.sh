@@ -2,9 +2,9 @@
 set -euo pipefail
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 未安装。请先安装 Python 3：" 1>&2
+  echo "python3 is not installed. Please install Python 3 first:" 1>&2
   echo "  - Homebrew: brew install python" 1>&2
-  echo "  - 或从 https://www.python.org/downloads/macos/ 下载" 1>&2
+  echo "  - Or download from https://www.python.org/downloads/macos/" 1>&2
   exit 1
 fi
 
@@ -20,7 +20,7 @@ files=(
 
 for f in "${files[@]}"; do
   if [[ ! -f "${root_dir}/${f}" ]]; then
-    echo "未找到 ${root_dir}/${f}" 1>&2
+    echo "File not found: ${root_dir}/${f}" 1>&2
     exit 1
   fi
 done
@@ -55,5 +55,5 @@ else
   fi
 fi
 
-echo "OK: 已安装到 ${dst}"
-echo "提示: 重新打开终端后可直接使用 uniservice"
+echo "OK: Installed to ${dst}"
+echo "Hint: Reopen your terminal, then run: uniservice"

@@ -2,9 +2,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Show-InstallHint {
-  Write-Host "python3 未安装。请先安装 Python 3：" -ForegroundColor Yellow
+  Write-Host "Python 3 is not installed. Please install it first:" -ForegroundColor Yellow
   Write-Host "  - https://www.python.org/downloads/windows/"
-  Write-Host "  - 或 Microsoft Store 搜索 Python"
+  Write-Host "  - Or search for Python in Microsoft Store"
   throw "Python 3 is required."
 }
 
@@ -20,7 +20,7 @@ $files = @(
 foreach ($f in $files) {
   $p = Join-Path $root $f
   if (-not (Test-Path -LiteralPath $p)) {
-    throw "未找到 $p"
+    throw "File not found: $p"
   }
 }
 
@@ -97,5 +97,5 @@ if ($existing -notlike '*uniservice\bin*') {
   Add-Content -LiteralPath $profilePath -Value "`r`n$snippet`r`n"
 }
 
-Write-Host "OK: 已安装到 $installDir"
-Write-Host "提示: 重新打开 PowerShell/CMD 后可直接使用 uniservice"
+Write-Host "OK: Installed to $installDir"
+Write-Host "Hint: Reopen PowerShell/CMD, then run: uniservice"
