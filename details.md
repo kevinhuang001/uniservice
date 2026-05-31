@@ -1,165 +1,174 @@
-# uniservice：各平台 add/list/remove/cat/enable/disable/start/stop 原理
+# Platform internals
 
-本文只介绍不同操作系统上 `uniservice add / list / cat / enable / disable / start / stop / remove` 背后的原生机制与典型落盘位置。
+[中文说明](details.zh.md)
 
-## Linux（systemd）
+This document explains how `uniservice` maps commands to native OS mechanisms:
 
-Linux 上用 systemd 的 `.service` unit 来托管进程（自启/守护/重启均由 systemd 完成）。
+- `add`
+- `list`
+- `cat`
+- `enable`
+- `disable`
+- `start`
+- `stop`
+- `remove`
 
-**add**
+## Linux (systemd)
 
-- 写入 unit 文件：
-  - `--user`：`~/.config/systemd/user/uniservice-NAME.service`
-  - `--system`：`/etc/systemd/system/uniservice-NAME.service`
-- unit 的关键字段：
-  - `WorkingDirectory=...`（来自 `--workdir`，不传则默认当前目录）
+Linux uses systemd `.service` units. Autostart, supervision and restarts are handled by systemd.
+
+### add
+
+- Write a unit file:
+  - `--user`: `~/.config/systemd/user/uniservice-NAME.service`
+  - `--system`: `/etc/systemd/system/uniservice-NAME.service`
+- Key fields:
+  - `WorkingDirectory=...` (from `--workdir`, defaults to current directory)
   - `ExecStart=/usr/bin/env bash -lc '<cmd>'`
-  - `Restart=always`、`RestartSec=2`
-  - `WantedBy=default.target`（user）或 `multi-user.target`（system）
-- 让 systemd 识别并启用：
+  - `Restart=always`, `RestartSec=2`
+  - `WantedBy=default.target` (user) or `multi-user.target` (system)
+- Reload and activate:
   - `systemctl daemon-reload`
-  - `systemctl enable --now uniservice-NAME.service`（user 作用域用 `systemctl --user ...`；等价于 enable + start）
-- 若同名服务已存在，uniservice 会提示是否覆盖；选择覆盖会先 remove 再 add。
+  - `systemctl enable --now uniservice-NAME.service` (user scope uses `systemctl --user ...`)
+- If a service with the same name exists, uniservice asks before overwriting.
 
-**enable**
+### enable / disable
 
-- `systemctl enable uniservice-NAME.service`（user 作用域用 `systemctl --user ...`）
+- `enable`: `systemctl enable uniservice-NAME.service`
+- `disable`: `systemctl disable uniservice-NAME.service`
 
-**disable**
+### start / stop
 
-- `systemctl disable uniservice-NAME.service`（忽略失败）
+- `start`: `systemctl start uniservice-NAME.service`
+- `stop`: `systemctl stop uniservice-NAME.service`
 
-**start**
+### list
 
-- `systemctl start uniservice-NAME.service`
+- Scan `uniservice-*.service` in the unit directory to list names.
+- For each service:
+  - ENABLED: `systemctl is-enabled uniservice-NAME.service`
+  - RUNNING: `systemctl is-active uniservice-NAME.service`
 
-**stop**
+### remove
 
-- `systemctl stop uniservice-NAME.service`（忽略失败）
-
-**list**
-
-- 通过扫描对应目录下 `uniservice-*.service` 来列出 NAME，并用 systemd 查询状态：
-  - ENABLED：`systemctl is-enabled uniservice-NAME.service`
-  - RUNNING：`systemctl is-active uniservice-NAME.service`
-
-**remove**
-
-- 关闭并取消自启（忽略失败）：
+- Stop + disable, then remove the unit file:
   - `systemctl disable --now uniservice-NAME.service`
   - `systemctl reset-failed uniservice-NAME.service`
   - `systemctl daemon-reload`
-- 删除 unit 文件。
 
-**cat**
+### cat
 
-- 读取对应的 unit 文件，从 `WorkingDirectory=` 和 `ExecStart=... -lc '<cmd>'` 里提取工作目录与命令。
-- 输出一条等价的 `uniservice add --workdir ... -- ...`，用于复原/迁移。
+- Read the unit file and extract:
+  - `WorkingDirectory=`
+  - the shell command inside `ExecStart=... bash -lc '<cmd>'`
+- Print an equivalent `uniservice add --workdir ... -- ...`.
 
-## macOS（launchd）
+## macOS (launchd)
 
-macOS 上用 launchd 的 plist（LaunchAgents/LaunchDaemons）描述 job，并通过 `launchctl bootstrap` 注册到 domain 让 launchd 托管。
+macOS uses launchd plists (LaunchAgents/LaunchDaemons) and `launchctl` to manage jobs.
 
-**add**
+### add
 
-- 写入 plist：
-  - `--user`：`~/Library/LaunchAgents/com.uniservice.NAME.plist`
-  - `--system`：`/Library/LaunchDaemons/com.uniservice.NAME.plist`
-- plist 的关键字段：
+- Write a plist:
+  - `--user`: `~/Library/LaunchAgents/com.uniservice.NAME.plist`
+  - `--system`: `/Library/LaunchDaemons/com.uniservice.NAME.plist`
+- Key fields:
   - `Label=com.uniservice.NAME`
-  - `WorkingDirectory=...`（来自 `--workdir`，不传则默认当前目录）
+  - `WorkingDirectory=...` (from `--workdir`, defaults to current directory)
   - `ProgramArguments=[/bin/bash, -lc, '<cmd>']`
   - `RunAtLoad=true`
   - `KeepAlive=true`
-- 注册并拉起：
-  - 先尝试 `launchctl bootout ...` 卸载旧的（通常会忽略失败，常见于“原本没加载过”）
+- Register and start:
   - `launchctl bootstrap <domain> <plist>`
-  - 若 `bootstrap` 返回 5（Input/output error），会回退尝试 `launchctl load -w <plist>`
-  - `launchctl enable <domain>/<label>`（可能被忽略失败）
-  - `launchctl kickstart -k <domain>/<label>`（可能被忽略失败）
-- domain 选择：
-  - `--system`：`system`
-  - `--user`：通常是 `gui/<uid>`（某些会话环境下也可能是 `user/<uid>`）
-- 若同名服务已存在，uniservice 会提示是否覆盖；选择覆盖会先 remove 再 add。
+  - If `bootstrap` fails with exit code 5 (Input/output error), fall back to `launchctl load -w <plist>` for compatibility.
+  - `launchctl enable <domain>/<label>`
+  - `launchctl kickstart -k <domain>/<label>`
+- Domain selection:
+  - `--system`: `system`
+  - `--user`: typically `gui/<uid>` (some sessions use `user/<uid>`)
 
-**enable**
+### enable / disable
 
-- 只修改“是否允许启动”的开关：`launchctl enable <domain>/<label>`  
-  不负责拉起进程；要运行请用 `start`。
+- `enable`: only flips the “allowed to run” flag: `launchctl enable <domain>/<label>`  
+  It does not start the process by itself.
+- `disable`: only flips the “allowed to run” flag: `launchctl disable <domain>/<label>`  
+  It does not stop the process by itself.
 
-**disable**
+Note: because the plist contains `RunAtLoad=true`, some load/register operations may start the job immediately.
 
-- 只修改“是否允许启动”的开关：`launchctl disable <domain>/<label>`  
-  不负责停止进程；要停止请用 `stop`。
+### start
 
-**start**
+- Ensure the job is registered, then start it:
+  - `launchctl bootstrap <domain> <plist>`
+  - `launchctl kickstart -k <domain>/<label>`
 
-- `launchctl bootstrap <domain> <plist>` 后再 `launchctl kickstart -k <domain>/<label>`  
-  注意：plist 里 `RunAtLoad=true`，因此 bootstrap/load 本身也可能触发立即启动。
+### stop
 
-**stop**
+- Stop/terminate and unload the job to prevent `KeepAlive=true` from instantly restarting it:
+  - `launchctl stop/kill ...`
+  - `launchctl bootout ...` (and legacy unload when needed)
 
-- `launchctl stop/kill ...` 后执行 `bootout/unload` 卸载 job，避免被 `KeepAlive=true` 立即拉起
+### list
 
-**list**
+- Scan `com.uniservice.*.plist` in the plist directory to list names.
+- For each service:
+  - ENABLED: `launchctl print-disabled <domain>` (not listed as disabled => enabled)
+  - RUNNING:
+    - try `launchctl list` (PID present => running)
+    - if not available, fall back to `pgrep -f` on the command string
 
-- 通过扫描对应目录下 `com.uniservice.*.plist` 来列出 NAME，并用 launchd 查询状态：
-  - ENABLED：`launchctl print-disabled <domain>`（未标记 disabled 视为 enabled）
-  - RUNNING：`launchctl list`（PID 非 `-` 视为 running）
+### remove
 
-**remove**
+- Unregister/unload the job and delete the plist file:
+  - `launchctl bootout <domain> <plist>` (best-effort)
+  - delete plist
 
-- `launchctl bootout <domain> <plist>` 反注册（通常忽略失败）
-- 删除 plist 文件。
+### cat
 
-**cat**
+- Read the plist and extract:
+  - `WorkingDirectory`
+  - the command in `ProgramArguments`
+- Print an equivalent `uniservice add --workdir ... -- ...`.
 
-- 读取对应 plist，从 `WorkingDirectory` 与 `ProgramArguments` 中提取工作目录与命令。
-- 输出一条等价的 `uniservice add --workdir ... -- ...`，用于复原/迁移。
+## Windows (Scheduled Tasks)
 
-## Windows（Scheduled Tasks 计划任务）
+Windows uses Scheduled Tasks managed via `schtasks.exe`.
 
-Windows 上用计划任务实现“开机触发 + SYSTEM 身份运行”的托管方式，通过 `schtasks.exe` 管理任务。
+### add
 
-**add**
+- Create a task:
+  - Task name: `uniservice-NAME`
+  - Trigger: `/SC ONSTART`
+  - Account: `/RU SYSTEM`
+  - Privilege: `/RL HIGHEST`
+  - Action: `/TR "<cmd>"` (typically wraps `cmd.exe /c "cd /d <workdir> && <command>"` to set working directory)
+- Admin privileges are required to create ONSTART + SYSTEM tasks.
 
-- 创建任务：
-  - 任务名：`uniservice-NAME`
-  - 触发：`/SC ONSTART`
-  - 运行账号：`/RU SYSTEM`
-  - 权限：`/RL HIGHEST`
-  - 动作：`/TR "<cmd>"`（一般会包一层 `cmd.exe /c "cd /d <workdir> && <command>"` 以设置工作目录）
-- 通常需要管理员权限（否则无法创建 ONSTART + SYSTEM 的任务）。
-- 若同名服务已存在，uniservice 会提示是否覆盖；选择覆盖会先 remove 再 add。
+### enable / disable
 
-**enable**
+- `enable`: `schtasks.exe /Change /TN uniservice-NAME /Enable`
+- `disable`: `schtasks.exe /Change /TN uniservice-NAME /Disable`
 
-- `schtasks.exe /Change /TN uniservice-NAME /Enable`
+### start / stop
 
-**disable**
+- `start`: `schtasks.exe /Run /TN uniservice-NAME`
+- `stop`: `schtasks.exe /End /TN uniservice-NAME`
 
-- `schtasks.exe /Change /TN uniservice-NAME /Disable`
+### list
 
-**start**
+- `schtasks.exe /Query /FO CSV /V`, filter tasks with `TaskName` starting with `uniservice-`.
+- Infer:
+  - ENABLED from `Scheduled Task State` (Enabled/Disabled)
+  - RUNNING from `Status` (Running/Ready/etc.)
 
-- `schtasks.exe /Run /TN uniservice-NAME`
+### remove
 
-**stop**
+- Stop, then delete:
+  - `schtasks.exe /End /TN uniservice-NAME`
+  - `schtasks.exe /Delete /TN uniservice-NAME /F`
 
-- `schtasks.exe /End /TN uniservice-NAME`（忽略失败）
+### cat
 
-**list**
-
-- `schtasks.exe /Query /FO CSV /V`，筛选 `TaskName` 以 `uniservice-` 开头的任务，并从输出字段推断：
-  - ENABLED：`Scheduled Task State`（Enabled/Disabled）
-  - RUNNING：`Status`（Running/Ready 等）
-
-**remove**
-
-- `schtasks.exe /End /TN uniservice-NAME`（忽略失败）
-- `schtasks.exe /Delete /TN uniservice-NAME /F`（忽略失败）
-
-**cat**
-
-- 读取计划任务的 XML（`schtasks.exe /Query /TN uniservice-NAME /XML`），从动作里提取工作目录与命令。
-- 尽可能输出一条等价的 `uniservice add --workdir ... -- ...`；若解析失败则直接输出任务的原始 Command/Arguments。
+- Read task XML: `schtasks.exe /Query /TN uniservice-NAME /XML`
+- Extract workdir + command from the action fields.
+- Print an equivalent `uniservice add --workdir ... -- ...` when possible; otherwise print raw Command/Arguments.
