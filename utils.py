@@ -138,12 +138,10 @@ class Scope:
     value: str
 
     @staticmethod
-    def from_args(args: object) -> "Scope":
-        if getattr(args, "system", False):
+    def from_env() -> "Scope":
+        if os.name == "nt":
             return Scope("system")
-        if getattr(args, "user", False):
-            return Scope("user")
-        if os.name != "nt" and is_root_unix():
+        if is_root_unix():
             return Scope("system")
         return Scope("user")
 

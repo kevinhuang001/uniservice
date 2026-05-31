@@ -13,6 +13,13 @@ This document explains how `uniservice` maps commands to native OS mechanisms:
 - `stop`
 - `remove`
 
+## Scope (macOS/Linux)
+
+uniservice decides scope automatically:
+
+- Normal execution: user scope
+- `sudo uniservice ...`: system scope
+
 ## Linux (systemd)
 
 Linux uses systemd `.service` units. Autostart, supervision and restarts are handled by systemd.
@@ -20,8 +27,8 @@ Linux uses systemd `.service` units. Autostart, supervision and restarts are han
 ### add
 
 - Write a unit file:
-  - `--user`: `~/.config/systemd/user/uniservice-NAME.service`
-  - `--system`: `/etc/systemd/system/uniservice-NAME.service`
+  - user scope: `~/.config/systemd/user/uniservice-NAME.service`
+  - system scope: `/etc/systemd/system/uniservice-NAME.service`
 - Key fields:
   - `WorkingDirectory=...` (from `--workdir`, defaults to current directory)
   - `ExecStart=/usr/bin/env bash -lc '<cmd>'`
@@ -70,8 +77,8 @@ macOS uses launchd plists (LaunchAgents/LaunchDaemons) and `launchctl` to manage
 ### add
 
 - Write a plist:
-  - `--user`: `~/Library/LaunchAgents/com.uniservice.NAME.plist`
-  - `--system`: `/Library/LaunchDaemons/com.uniservice.NAME.plist`
+  - user scope: `~/Library/LaunchAgents/com.uniservice.NAME.plist`
+  - system scope: `/Library/LaunchDaemons/com.uniservice.NAME.plist`
 - Key fields:
   - `Label=com.uniservice.NAME`
   - `WorkingDirectory=...` (from `--workdir`, defaults to current directory)
@@ -84,8 +91,8 @@ macOS uses launchd plists (LaunchAgents/LaunchDaemons) and `launchctl` to manage
   - `launchctl enable <domain>/<label>`
   - `launchctl kickstart -k <domain>/<label>`
 - Domain selection:
-  - `--system`: `system`
-  - `--user`: typically `gui/<uid>` (some sessions use `user/<uid>`)
+  - system scope: `system`
+  - user scope: typically `gui/<uid>` (some sessions use `user/<uid>`)
 
 ### enable / disable
 

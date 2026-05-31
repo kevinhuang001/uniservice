@@ -52,20 +52,26 @@ It installs to `%LOCALAPPDATA%\uniservice\bin\` and updates PATH (profile + user
 
 ## Usage
 
+### Scope (macOS/Linux)
+
+- Run `uniservice` normally: manages current-user services.
+- Run via `sudo uniservice ...`: manages system services.
+
 ### Add
 
 ```bash
-uniservice add --name demo --user --workdir /tmp -- python3 -m http.server 8000
+uniservice add --name demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
 - If the executable is not an absolute path, uniservice will try to resolve it from PATH and print a WARNING.
+- If `--workdir` is not provided, the command runs in the current directory.
 - If a service with the same name already exists, uniservice will ask whether to overwrite it.
 - `add` performs `enable` + `start`.
 
 ### List
 
 ```bash
-uniservice list --user
+uniservice list
 ```
 
 Output is TSV (tab-separated):
@@ -77,16 +83,16 @@ Output is TSV (tab-separated):
 ### Control
 
 ```bash
-uniservice enable  --name demo --user
-uniservice start   --name demo --user
-uniservice stop    --name demo --user
-uniservice disable --name demo --user
+uniservice enable  --name demo
+uniservice start   --name demo
+uniservice stop    --name demo
+uniservice disable --name demo
 ```
 
 ### Remove
 
 ```bash
-uniservice remove --name demo --user
+uniservice remove --name demo
 ```
 
 `remove` performs `stop` + `disable` before deleting the definition.
@@ -94,7 +100,7 @@ uniservice remove --name demo --user
 ### Cat
 
 ```bash
-uniservice cat --name demo --user
+uniservice cat --name demo
 ```
 
 ## Logging

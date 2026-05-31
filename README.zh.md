@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-跨平台服务管理工具（类似 nssm，但不依赖常驻守护进程），把“长期运行/自启/托管”交给操作系统原生机制：
+跨平台服务管理工具，把“长期运行/自启/托管”交给操作系统原生机制：
 
 - Linux：systemd（user/system）
 - macOS：launchd（LaunchAgents/LaunchDaemons）
@@ -52,20 +52,26 @@ PowerShell 执行：
 
 ## 使用
 
+### 作用域（macOS/Linux）
+
+- 直接运行 `uniservice`：管理当前用户服务
+- 通过 `sudo uniservice ...` 运行：管理系统服务
+
 ### add
 
 ```bash
-uniservice add --name demo --user --workdir /tmp -- python3 -m http.server 8000
+uniservice add --name demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
 - 如果可执行文件不是全路径，uniservice 会尝试从 PATH 自动补全，并给 WARNING。
+- 如果不设置 `--workdir`，默认使用当前目录执行命令。
 - 若同名服务已存在，会提示是否覆盖。
 - `add` 会执行 `enable` + `start`。
 
 ### list
 
 ```bash
-uniservice list --user
+uniservice list
 ```
 
 输出为 TSV（三列，以制表符分隔）：
@@ -77,16 +83,16 @@ uniservice list --user
 ### 控制
 
 ```bash
-uniservice enable  --name demo --user
-uniservice start   --name demo --user
-uniservice stop    --name demo --user
-uniservice disable --name demo --user
+uniservice enable  --name demo
+uniservice start   --name demo
+uniservice stop    --name demo
+uniservice disable --name demo
 ```
 
 ### remove
 
 ```bash
-uniservice remove --name demo --user
+uniservice remove --name demo
 ```
 
 `remove` 会先执行 `stop` + `disable` 再删除定义。
@@ -94,7 +100,7 @@ uniservice remove --name demo --user
 ### cat
 
 ```bash
-uniservice cat --name demo --user
+uniservice cat --name demo
 ```
 
 ## 日志
