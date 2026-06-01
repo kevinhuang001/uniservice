@@ -37,6 +37,39 @@ def get_backend(scope: Scope):
         return WindowsBackend(scope)
     raise SystemExit("Unsupported platform.")
 
+def parse_add_argv(argv: list[str]) -> tuple[str, str, list[str]]:
+    if not argv:
+        raise SystemExit("Missing NAME.")
+    if argv[0] == "--":
+        raise SystemExit("Missing NAME.")
+
+    name = argv[0].strip()
+    if not name:
+        raise SystemExit("Missing NAME.")
+
+    workdir = ""
+    rest = argv[1:]
+    cmd_parts: list[str] = []
+
+    i = 0
+    while i < len(rest):
+        t = rest[i]
+        if t == "--":
+            cmd_parts = rest[i + 1 :]
+            break
+        if t == "--workdir":
+            if i + 1 >= len(rest):
+                raise SystemExit("Missing value for --workdir.")
+            workdir = rest[i + 1]
+            i += 2
+            continue
+        if t.startswith("--"):
+            raise SystemExit(f"Unknown option for add: {t}")
+        cmd_parts = rest[i:]
+        break
+
+    return name, workdir, cmd_parts
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="uniservice", add_help=True)
@@ -71,23 +104,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p_remove.add_argument("name", help="service name")
 
     p_add = sub.add_parser("add")
-    p_add.add_argument("name", help="service name")
-    p_add.add_argument(
-        "--workdir",
-        default="",
-        help="working directory for the service (default: current dir)",
-    )
-    p_add.add_argument("remainder", nargs=argparse.REMAINDER)
+    p_add.add_argument("argv", nargs=argparse.REMAINDER)
 
     return parser.parse_args(argv)
-
-
-def normalize_command_parts(remainder: list[str]) -> list[str]:
-    if not remainder:
-        return []
-    if remainder[0] == "--":
-        return remainder[1:]
-    return remainder
 
 
 def main(argv: list[str]) -> int:
@@ -190,31 +209,31 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "add":
         ensure_scope_allowed(scope)
-        logger.info("cmd=add name=%s", args.name)
-        cmd_parts_user = normalize_command_parts(args.remainder)
+        name, workdir, cmd_parts_user = parse_add_argv(args.argv)
+        logger.info("cmd=add name=%s", name)
         require_command(cmd_parts_user)
         cmd_parts_resolved = resolve_command_parts(cmd_parts_user)
-        if not args.workdir:
+        if not workdir:
             logger.warning("No --workdir provided; command runs in current directory: %s", Path.cwd())
-        wd = Path(args.workdir) if args.workdir else Path.cwd()
-        if backend.exists(args.name):
+        wd = Path(workdir) if workdir else Path.cwd()
+        if backend.exists(name):
             if sys.stdin.isatty():
-                answer = input(f'Service "{args.name}" already exists. Overwrite? [y/N] ').strip().lower()
+                answer = input(f'Service "{name}" already exists. Overwrite? [y/N] ').strip().lower()
                 if answer not in {"y", "yes"}:
                     raise SystemExit("Aborted.")
             else:
-                raise SystemExit(f'Service "{args.name}" already exists. Run in an interactive terminal to confirm overwrite.')
-            backend.stop(args.name)
-            backend.disable(args.name)
-            backend.remove(args.name)
-        backend.create(args.name, wd, cmd_parts_resolved)
-        backend.enable(args.name)
-        backend.start(args.name)
-        print(f'OK: added "{args.name}"')
+                raise SystemExit(f'Service "{name}" already exists. Run in an interactive terminal to confirm overwrite.')
+            backend.stop(name)
+            backend.disable(name)
+            backend.remove(name)
+        backend.create(name, wd, cmd_parts_resolved)
+        backend.enable(name)
+        backend.start(name)
+        print(f'OK: added "{name}"')
         if platform() != "win" and scope.value == "system":
-            print(f"Hint: Run: sudo uniservice status {args.name}")
+            print(f"Hint: Run: sudo uniservice status {name}")
         else:
-            print(f"Hint: Run: uniservice status {args.name}")
+            print(f"Hint: Run: uniservice status {name}")
         return 0
 
     raise SystemExit("Unknown command.")
