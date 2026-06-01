@@ -45,25 +45,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p_list = sub.add_parser("list")
 
     p_cat = sub.add_parser("cat")
-    p_cat.add_argument("--name", required=True, help="service name")
+    p_cat.add_argument("name", help="service name")
+
+    p_status = sub.add_parser("status")
+    p_status.add_argument("name", help="service name")
+
+    p_logs = sub.add_parser("logs")
+    p_logs.add_argument("name", help="service name")
+    p_logs.add_argument("--lines", type=int, default=200, help="number of log lines to show")
+    p_logs.add_argument("--follow", action="store_true", help="follow logs")
 
     p_enable = sub.add_parser("enable")
-    p_enable.add_argument("--name", required=True, help="service name")
+    p_enable.add_argument("name", help="service name")
 
     p_disable = sub.add_parser("disable")
-    p_disable.add_argument("--name", required=True, help="service name")
+    p_disable.add_argument("name", help="service name")
 
     p_start = sub.add_parser("start")
-    p_start.add_argument("--name", required=True, help="service name")
+    p_start.add_argument("name", help="service name")
 
     p_stop = sub.add_parser("stop")
-    p_stop.add_argument("--name", required=True, help="service name")
+    p_stop.add_argument("name", help="service name")
 
     p_remove = sub.add_parser("remove")
-    p_remove.add_argument("--name", required=True, help="service name")
+    p_remove.add_argument("name", help="service name")
 
     p_add = sub.add_parser("add")
-    p_add.add_argument("--name", required=True, help="service name")
+    p_add.add_argument("name", help="service name")
     p_add.add_argument(
         "--workdir",
         default="",
@@ -117,6 +125,22 @@ def main(argv: list[str]) -> int:
         backend.cat(args.name)
         return 0
 
+    if args.cmd == "status":
+        ensure_scope_allowed(scope)
+        if not backend.exists(args.name):
+            raise SystemExit(f'Service "{args.name}" not found.')
+        logger.info("cmd=status name=%s", args.name)
+        backend.status(args.name)
+        return 0
+
+    if args.cmd == "logs":
+        ensure_scope_allowed(scope)
+        if not backend.exists(args.name):
+            raise SystemExit(f'Service "{args.name}" not found.')
+        logger.info("cmd=logs name=%s", args.name)
+        backend.logs(args.name, lines=args.lines, follow=args.follow)
+        return 0
+
     if args.cmd == "enable":
         ensure_scope_allowed(scope)
         if not backend.exists(args.name):
@@ -167,9 +191,9 @@ def main(argv: list[str]) -> int:
     if args.cmd == "add":
         ensure_scope_allowed(scope)
         logger.info("cmd=add name=%s", args.name)
-        cmd_parts = normalize_command_parts(args.remainder)
-        require_command(cmd_parts)
-        cmd_parts = resolve_command_parts(cmd_parts)
+        cmd_parts_user = normalize_command_parts(args.remainder)
+        require_command(cmd_parts_user)
+        cmd_parts_resolved = resolve_command_parts(cmd_parts_user)
         if not args.workdir:
             logger.warning("No --workdir provided; command runs in current directory: %s", Path.cwd())
         wd = Path(args.workdir) if args.workdir else Path.cwd()
@@ -183,10 +207,14 @@ def main(argv: list[str]) -> int:
             backend.stop(args.name)
             backend.disable(args.name)
             backend.remove(args.name)
-        backend.create(args.name, wd, cmd_parts)
+        backend.create(args.name, wd, cmd_parts_resolved)
         backend.enable(args.name)
         backend.start(args.name)
         print(f'OK: added "{args.name}"')
+        if platform() != "win" and scope.value == "system":
+            print(f"Hint: Run: sudo uniservice status {args.name}")
+        else:
+            print(f"Hint: Run: uniservice status {args.name}")
         return 0
 
     raise SystemExit("Unknown command.")

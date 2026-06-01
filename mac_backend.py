@@ -32,10 +32,23 @@ def mac_domains(scope: Scope) -> list[str]:
     return [f"gui/{uid}", f"user/{uid}"]
 
 
+def mac_service_log_dir(scope: Scope) -> Path:
+    if scope.value == "system":
+        return Path("/var/log/uniservice")
+    uid = sudo_target_uid() if is_root_unix() else None
+    home = user_home_for_uid(uid) if uid is not None else Path.home()
+    return home / ".uniservice" / "services"
+
+
+def mac_service_log_paths(name: str, scope: Scope) -> tuple[Path, Path]:
+    d = mac_service_log_dir(scope)
+    return d / f"{name}.out.log", d / f"{name}.err.log"
+
+
 class MacBackend(Backend):
+
     def _plist_path(self, name: str) -> Path:
         return mac_plist_path(name, self.scope)
-
     def _label(self, name: str) -> str:
         return mac_label(name)
 
@@ -73,6 +86,8 @@ class MacBackend(Backend):
 
         label = self._label(name)
         cmd_str = command_string(command_parts)
+        out_path, err_path = mac_service_log_paths(name, self.scope)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         content = "\n".join(
             [
                 '<?xml version="1.0" encoding="UTF-8"?>',
@@ -83,6 +98,10 @@ class MacBackend(Backend):
                 f"  <string>{xml_escape(label)}</string>",
                 "  <key>WorkingDirectory</key>",
                 f"  <string>{xml_escape(str(wd))}</string>",
+                "  <key>StandardOutPath</key>",
+                f"  <string>{xml_escape(str(out_path))}</string>",
+                "  <key>StandardErrorPath</key>",
+                f"  <string>{xml_escape(str(err_path))}</string>",
                 "  <key>ProgramArguments</key>",
                 "  <array>",
                 "    <string>/bin/bash</string>",
@@ -121,8 +140,51 @@ class MacBackend(Backend):
 
         cmd_tokens = shlex.split(cmd_str)
         quoted_cmd = " ".join(shlex.quote(t) for t in cmd_tokens)
-        scope_flag = "--system" if self.scope.value == "system" else "--user"
-        print(f"uniservice add --name {shlex.quote(name)} {scope_flag} --workdir {shlex.quote(wd)} -- {quoted_cmd}")
+        prefix = "sudo " if self.scope.value == "system" else ""
+        print(f"{prefix}uniservice add {shlex.quote(name)} --workdir {shlex.quote(wd)} -- {quoted_cmd}")
+
+    def status(self, name: str) -> None:
+        logger.info("mac status name=%s", name)
+        plist_path = self._plist_path(name)
+        if not plist_path.exists():
+            raise SystemExit(f"Service not found: {name}")
+        label = self._label(name)
+        last_err = ""
+        for domain in self._domains():
+            cp = run(["launchctl", "print", f"{domain}/{label}"], check=False, capture=True)
+            if cp.returncode == 0:
+                if cp.stdout:
+                    print(cp.stdout, end="" if cp.stdout.endswith("\n") else "\n")
+                if cp.stderr:
+                    print(cp.stderr, end="" if cp.stderr.endswith("\n") else "\n")
+                return
+            text = (cp.stdout or "") + "\n" + (cp.stderr or "")
+            last_err = text.strip() or f"launchctl print failed (rc={cp.returncode})"
+        raise SystemExit(last_err)
+
+    def logs(self, name: str, *, lines: int, follow: bool) -> None:
+        logger.info("mac logs name=%s lines=%s follow=%s", name, lines, follow)
+        plist_path = self._plist_path(name)
+        if not plist_path.exists():
+            raise SystemExit(f"Service not found: {name}")
+
+        out_path, err_path = mac_service_log_paths(name, self.scope)
+        try:
+            data = plistlib.loads(plist_path.read_bytes())
+            p_out = data.get("StandardOutPath")
+            p_err = data.get("StandardErrorPath")
+            if isinstance(p_out, str) and p_out.strip():
+                out_path = Path(p_out.strip())
+            if isinstance(p_err, str) and p_err.strip():
+                err_path = Path(p_err.strip())
+        except Exception:
+            pass
+
+        if follow:
+            run(["tail", "-n", str(lines), "-f", str(out_path), str(err_path)], check=False)
+        else:
+            run(["tail", "-n", str(lines), str(out_path)], check=False)
+            run(["tail", "-n", str(lines), str(err_path)], check=False)
 
     def exists(self, name: str) -> bool:
         plist_path = self._plist_path(name)

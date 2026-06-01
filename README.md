@@ -23,6 +23,11 @@ Install scripts:
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | bash
 ```
 
+- For a system-wide install (so `sudo uniservice ...` uses the same version):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | sudo bash
+  ```
+
 - non-root: installs to `~/.local/bin/` and writes `~/.profile`
 - root: installs to `/usr/local/bin/` and writes `/etc/profile`
 
@@ -36,6 +41,12 @@ uniservice --help
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | bash
+```
+
+For a system-wide install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | sudo bash
 ```
 
 Same behavior as macOS.
@@ -60,7 +71,7 @@ It installs to `%LOCALAPPDATA%\uniservice\bin\` and updates PATH (profile + user
 ### Add
 
 ```bash
-uniservice add --name demo --workdir /tmp -- python3 -m http.server 8000
+uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
 - If the executable is not an absolute path, uniservice will try to resolve it from PATH and print a WARNING.
@@ -83,16 +94,16 @@ Output is TSV (tab-separated):
 ### Control
 
 ```bash
-uniservice enable  --name demo
-uniservice start   --name demo
-uniservice stop    --name demo
-uniservice disable --name demo
+uniservice enable  demo
+uniservice start   demo
+uniservice stop    demo
+uniservice disable demo
 ```
 
 ### Remove
 
 ```bash
-uniservice remove --name demo
+uniservice remove demo
 ```
 
 `remove` performs `stop` + `disable` before deleting the definition.
@@ -100,7 +111,7 @@ uniservice remove --name demo
 ### Cat
 
 ```bash
-uniservice cat --name demo
+uniservice cat demo
 ```
 
 ## Logging

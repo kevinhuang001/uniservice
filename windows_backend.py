@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -15,11 +16,16 @@ def win_task_name(name: str) -> str:
     return f"uniservice-{name}"
 
 
-def win_build_tr(wd: Path, command_parts: list[str]) -> str:
+def win_build_tr(name: str, wd: Path, command_parts: list[str]) -> str:
     cmdline = subprocess.list2cmdline(command_parts)
     wd_str = str(wd).replace('"', '""')
     cmdline_inner = cmdline.replace('"', '""')
-    return f'cmd.exe /c "cd /d ""{wd_str}"" && {cmdline_inner}"'
+    program_data = os.environ.get("ProgramData") or r"C:\ProgramData"
+    log_dir = Path(program_data) / "uniservice" / "logs" / "services"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    out_path = str((log_dir / f"{name}.out.log")).replace('"', '""')
+    err_path = str((log_dir / f"{name}.err.log")).replace('"', '""')
+    return f'cmd.exe /c "cd /d ""{wd_str}"" && {cmdline_inner} 1>> ""{out_path}"" 2>> ""{err_path}"""'
 
 
 class WindowsBackend(Backend):
@@ -34,7 +40,7 @@ class WindowsBackend(Backend):
         logger.info("windows create name=%s wd=%s", name, wd)
         self._require_admin()
         tn = self._task_name(name)
-        tr = win_build_tr(wd, command_parts)
+        tr = win_build_tr(name, wd, command_parts)
         run(
             [
                 "schtasks.exe",
@@ -101,10 +107,53 @@ class WindowsBackend(Backend):
         if workdir and cmdline:
             argv = win_cmdline_split(cmdline)
             quoted = " ".join(shlex_quote_windows(a) for a in argv)
-            print(f'uniservice add --name "{name}" --workdir "{workdir}" -- {quoted}')
+            print(f'uniservice add "{name}" --workdir "{workdir}" -- {quoted}')
             return
 
         print(f"{cmd} {args}")
+
+    def status(self, name: str) -> None:
+        logger.info("windows status name=%s", name)
+        self._require_admin()
+        tn = self._task_name(name)
+        run(["schtasks.exe", "/Query", "/TN", tn, "/V", "/FO", "LIST"], check=False)
+
+    def logs(self, name: str, *, lines: int, follow: bool) -> None:
+        logger.info("windows logs name=%s lines=%s follow=%s", name, lines, follow)
+        self._require_admin()
+        program_data = os.environ.get("ProgramData") or r"C:\ProgramData"
+        log_dir = Path(program_data) / "uniservice" / "logs" / "services"
+        out_path = log_dir / f"{name}.out.log"
+        err_path = log_dir / f"{name}.err.log"
+        if follow:
+            run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-Command",
+                    f"Get-Content -LiteralPath @('{out_path}','{err_path}') -Tail {lines} -Wait",
+                ],
+                check=False,
+            )
+        else:
+            run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-Command",
+                    f'Get-Content -LiteralPath "{out_path}" -Tail {lines}',
+                ],
+                check=False,
+            )
+            run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-Command",
+                    f'Get-Content -LiteralPath "{err_path}" -Tail {lines}',
+                ],
+                check=False,
+            )
 
     def exists(self, name: str) -> bool:
         self._require_admin()

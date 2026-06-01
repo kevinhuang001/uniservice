@@ -93,8 +93,35 @@ class LinuxBackend(Backend):
         cmd_str = tokens[idx + 1]
         cmd_tokens = shlex.split(cmd_str)
         quoted_cmd = " ".join(shlex.quote(t) for t in cmd_tokens)
-        scope_flag = "--system" if self.scope.value == "system" else "--user"
-        print(f"uniservice add --name {shlex.quote(name)} {scope_flag} --workdir {shlex.quote(wd)} -- {quoted_cmd}")
+        prefix = "sudo " if self.scope.value == "system" else ""
+        print(f"{prefix}uniservice add {shlex.quote(name)} --workdir {shlex.quote(wd)} -- {quoted_cmd}")
+
+    def status(self, name: str) -> None:
+        logger.info("linux status name=%s", name)
+        unit_path = self._unit_path(name)
+        if not unit_path.exists():
+            raise SystemExit(f"Service not found: {name}")
+        if shutil.which("systemctl") is None:
+            raise SystemExit("systemctl is not installed.")
+        base = self._systemctl()
+        run(base + ["status", unit_filename(name), "--no-pager", "-l"], check=False)
+
+    def logs(self, name: str, *, lines: int, follow: bool) -> None:
+        logger.info("linux logs name=%s lines=%s follow=%s", name, lines, follow)
+        unit_path = self._unit_path(name)
+        if not unit_path.exists():
+            raise SystemExit(f"Service not found: {name}")
+        if shutil.which("journalctl") is None:
+            raise SystemExit("journalctl is not installed.")
+
+        unit = unit_filename(name)
+        if self.scope.value == "system":
+            cmd = ["journalctl", "-u", unit, "--no-pager", "-n", str(lines)]
+        else:
+            cmd = ["journalctl", "--user-unit", unit, "--no-pager", "-n", str(lines)]
+        if follow:
+            cmd.append("-f")
+        run(cmd, check=False)
 
     def exists(self, name: str) -> bool:
         unit_path = self._unit_path(name)

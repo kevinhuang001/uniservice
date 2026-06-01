@@ -23,6 +23,11 @@
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | bash
 ```
 
+- 如果你希望系统服务场景下（`sudo uniservice ...`）使用同一个版本，建议用 root 安装：
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | sudo bash
+  ```
+
 - 非 root：安装到 `~/.local/bin/`，并写入 `~/.profile`
 - root：安装到 `/usr/local/bin/`，并写入 `/etc/profile`
 
@@ -36,6 +41,12 @@ uniservice --help
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | bash
+```
+
+root 安装（系统级）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | sudo bash
 ```
 
 规则同 macOS。
@@ -60,7 +71,7 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 ### add
 
 ```bash
-uniservice add --name demo --workdir /tmp -- python3 -m http.server 8000
+uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
 - 如果可执行文件不是全路径，uniservice 会尝试从 PATH 自动补全，并给 WARNING。
@@ -83,16 +94,16 @@ uniservice list
 ### 控制
 
 ```bash
-uniservice enable  --name demo
-uniservice start   --name demo
-uniservice stop    --name demo
-uniservice disable --name demo
+uniservice enable  demo
+uniservice start   demo
+uniservice stop    demo
+uniservice disable demo
 ```
 
 ### remove
 
 ```bash
-uniservice remove --name demo
+uniservice remove demo
 ```
 
 `remove` 会先执行 `stop` + `disable` 再删除定义。
@@ -100,7 +111,7 @@ uniservice remove --name demo
 ### cat
 
 ```bash
-uniservice cat --name demo
+uniservice cat demo
 ```
 
 ## 日志

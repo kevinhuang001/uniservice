@@ -7,6 +7,8 @@ This document explains how `uniservice` maps commands to native OS mechanisms:
 - `add`
 - `list`
 - `cat`
+- `status`
+- `logs`
 - `enable`
 - `disable`
 - `start`
@@ -68,7 +70,19 @@ Linux uses systemd `.service` units. Autostart, supervision and restarts are han
 - Read the unit file and extract:
   - `WorkingDirectory=`
   - the shell command inside `ExecStart=... bash -lc '<cmd>'`
-- Print an equivalent `uniservice add --workdir ... -- ...`.
+- Print an equivalent `uniservice add NAME --workdir ... -- ...`.
+
+### status
+
+- Delegates to systemd status output:
+  - system scope: `systemctl status uniservice-NAME.service`
+  - user scope: `systemctl --user status uniservice-NAME.service`
+
+### logs
+
+- Delegates to journald:
+  - system scope: `journalctl -u uniservice-NAME.service -n <lines> [-f]`
+  - user scope: `journalctl --user-unit uniservice-NAME.service -n <lines> [-f]`
 
 ## macOS (launchd)
 
@@ -135,7 +149,20 @@ Note: because the plist contains `RunAtLoad=true`, some load/register operations
 - Read the plist and extract:
   - `WorkingDirectory`
   - the command in `ProgramArguments`
-- Print an equivalent `uniservice add --workdir ... -- ...`.
+- Print an equivalent `uniservice add NAME --workdir ... -- ...`.
+
+### status
+
+- Delegates to launchd’s job inspection:
+  - user scope: `launchctl print gui/<uid>/com.uniservice.NAME` (or `user/<uid>` fallback)
+  - system scope: `launchctl print system/com.uniservice.NAME`
+
+### logs
+
+- launchd itself does not provide a unified per-job log viewer.
+- uniservice writes `StandardOutPath` / `StandardErrorPath` into the plist and tails those files:
+  - user scope: `~/.uniservice/services/NAME.out.log` and `~/.uniservice/services/NAME.err.log`
+  - system scope: `/var/log/uniservice/NAME.out.log` and `/var/log/uniservice/NAME.err.log`
 
 ## Windows (Scheduled Tasks)
 
@@ -178,4 +205,17 @@ Windows uses Scheduled Tasks managed via `schtasks.exe`.
 
 - Read task XML: `schtasks.exe /Query /TN uniservice-NAME /XML`
 - Extract workdir + command from the action fields.
-- Print an equivalent `uniservice add --workdir ... -- ...` when possible; otherwise print raw Command/Arguments.
+- Print an equivalent `uniservice add NAME --workdir ... -- ...` when possible; otherwise print raw Command/Arguments.
+
+### status
+
+- Delegates to Task Scheduler’s verbose query output:
+  - `schtasks.exe /Query /TN uniservice-NAME /V /FO LIST`
+
+### logs
+
+- Scheduled Tasks do not provide a unified “service logs” viewer.
+- uniservice appends stdout/stderr redirections to the task action so logs are captured:
+  - `%ProgramData%\uniservice\logs\services\NAME.out.log`
+  - `%ProgramData%\uniservice\logs\services\NAME.err.log`
+- `logs --follow` tails the log files via PowerShell `Get-Content -Wait`.
