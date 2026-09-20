@@ -2,35 +2,43 @@
 #
 # uniservice installer.
 #
-# Installs a single self-contained `uniservice` executable (a Python zipapp) at
-# /usr/local/bin/uniservice and records the installation in
-# /usr/local/lib/uniservice/install.json.
+# Every release publishes two artifacts, and this installer lets you pick:
 #
-# Because the program is one file, one installation serves both scopes:
+#   default    portable zipapp       ~30 KB, needs Python 3.10+ on this machine
+#   --binary   standalone binary     bundles CPython, needs nothing, but is
+#                                    built per OS/architecture (~24 MB)
+#
+# The zipapp is the recommended default: one 30 KB file, identical on every
+# platform, and it uses the Python you already have.
+#
+# Either way the command lands in /usr/local/bin/uniservice and is recorded in
+# /usr/local/lib/uniservice/manifest, so one installation serves both scopes:
 #
 #   uniservice ...        -> per-user services
 #   sudo uniservice ...   -> system-wide services
 #
-# /usr/local/bin is on every account's PATH, so nothing else has to be arranged.
-# Writing there needs root: run the installer with sudo, or it fails.
+# /usr/local/bin is on every account's PATH, so the installer never edits a shell
+# startup file. Writing there needs root: run it with sudo, or it fails.
 #
 set -euo pipefail
 
 REPO_SLUG="${UNISERVICE_REPO_SLUG:-kevinhuang001/uniservice}"
-REPO_URL="https://github.com/${REPO_SLUG}"
+REPO_URL="${UNISERVICE_REPO_URL:-https://github.com/${REPO_SLUG}}"
 PROGRAM_NAME="uniservice"
-PACKAGE_NAME="uniservice_lib"
-MANIFEST_NAME="install.json"
-DEFAULT_INTERPRETER="/usr/bin/env python3"
+MANIFEST_NAME="manifest"
+CHECKSUM_FILE="SHA256SUMS"
 DEFAULT_PREFIX="/usr/local"
+MIN_PYTHON="3.10"
 
+want_binary=0
 prefix=""
 version=""
 expected_sha256=""
-from_dir=""
+from_file=""
 uninstall=0
 
 tmp_dir=""
+artifact=""
 
 log() { printf '%s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -51,27 +59,38 @@ Installs $PROGRAM_NAME into $DEFAULT_PREFIX. One installation there serves both
 scopes: '$PROGRAM_NAME ...' manages per-user services and 'sudo $PROGRAM_NAME ...'
 manages system services.
 
+Two artifacts are published for every release:
+
+  (default)   the portable zipapp: one ~30 KB file that runs on any platform,
+              but needs Python $MIN_PYTHON+ on this machine  [recommended]
+  --binary    a standalone binary that bundles its own CPython and needs no
+              Python at all, built for one OS/architecture (~24 MB)
+
 The installer must be able to write to $DEFAULT_PREFIX, so run it with sudo when
 you are not root. It never edits shell startup files: $DEFAULT_PREFIX/bin is
 already on PATH.
 
 Options:
+  --binary              Install the standalone binary instead of the zipapp.
   --prefix DIR          Install under DIR instead of $DEFAULT_PREFIX. For
                         packaging and tests; needs no elevated privileges.
-  --version TAG         Install a specific release, e.g. --version v1.2.0.
-                        Default: the latest release, else the main branch archive.
-  --sha256 HEX          Verify the downloaded artifact against this SHA-256 digest.
-  --from DIR            Build from a local checkout instead of downloading
-                        (DIR must contain $PACKAGE_NAME/).
+  --version TAG         Release to install, e.g. --version v1.2.0.
+                        Default: the latest release.
+  --sha256 HEX          Verify the artifact against this SHA-256 digest.
+                        By default the digest published in $CHECKSUM_FILE is used.
+  --from FILE           Install a local zipapp or binary instead of downloading.
   --uninstall           Remove a previous installation recorded in the manifest.
   -h, --help            Show this help.
 
 Environment:
-  UNISERVICE_REPO_SLUG  Override the GitHub repository (default: $REPO_SLUG).
+  UNISERVICE_REPO_SLUG  GitHub repository (default: $REPO_SLUG).
+  UNISERVICE_REPO_URL   Full base URL, for a mirror or a file:// tree
+                        (default: https://github.com/<slug>).
 
 Examples:
   curl -fsSL $REPO_URL/raw/main/install.sh | sudo bash
-  ./install.sh --version v1.2.0 --sha256 <digest>
+  curl -fsSL $REPO_URL/raw/main/install.sh | sudo bash -s -- --binary
+  sudo ./install.sh --version v1.2.0
   sudo ./install.sh --uninstall
 EOF
 }
@@ -81,6 +100,7 @@ EOF
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --binary) want_binary=1 ;;
     --prefix)
       [[ $# -ge 2 ]] || die "--prefix requires a value"
       prefix="$2"
@@ -101,10 +121,10 @@ while [[ $# -gt 0 ]]; do
     --sha256=*) expected_sha256="${1#*=}" ;;
     --from)
       [[ $# -ge 2 ]] || die "--from requires a value"
-      from_dir="$2"
+      from_file="$2"
       shift
       ;;
-    --from=*) from_dir="${1#*=}" ;;
+    --from=*) from_file="${1#*=}" ;;
     --uninstall) uninstall=1 ;;
     -h | --help)
       usage
@@ -118,8 +138,6 @@ done
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
-os_name="$(uname -s 2>/dev/null || echo unknown)"
-
 if [[ -z "$prefix" ]]; then
   prefix="$DEFAULT_PREFIX"
 fi
@@ -130,67 +148,31 @@ bin_dir="$prefix/bin"
 lib_dir="$prefix/lib/$PROGRAM_NAME"
 manifest="$lib_dir/$MANIFEST_NAME"
 
-python_hint() {
-  case "$os_name" in
-    Darwin)
-      printf '  - Homebrew: brew install python\n  - Or https://www.python.org/downloads/macos/\n'
-      ;;
-    *)
-      printf '  - Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y python3\n'
-      printf '  - RHEL/CentOS/Fedora: sudo dnf install -y python3\n'
-      printf '  - Arch: sudo pacman -S python\n'
-      printf '  - Alpine: sudo apk add python3\n'
-      ;;
+PLATFORM_OS=""
+PLATFORM_ARCH=""
+detect_platform() {
+  # Sets PLATFORM_OS and PLATFORM_ARCH.  The binary asset names are produced by
+  # scripts/build_binary.py; PyInstaller cannot cross-compile, so the name
+  # encodes the OS and the CPU architecture.
+  local machine
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    Linux) PLATFORM_OS="linux" ;;
+    Darwin) PLATFORM_OS="macos" ;;
+    *) PLATFORM_OS="unknown" ;;
+  esac
+
+  machine="$(uname -m 2>/dev/null || echo unknown)"
+  case "$machine" in
+    x86_64 | amd64) PLATFORM_ARCH="x86_64" ;;
+    aarch64) PLATFORM_ARCH="aarch64" ;;
+    arm64) PLATFORM_ARCH="arm64" ;;
+    *) PLATFORM_ARCH="$machine" ;;
   esac
 }
 
-find_python() {
-  local candidate
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      command -v "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
-
-python_is_supported() {
-  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
-}
-
-if ! python_bin="$(find_python)"; then
-  printf 'ERROR: python3 is not installed. Please install Python 3.10+ first:\n' >&2
-  python_hint >&2
-  exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Download + build helpers
-# ---------------------------------------------------------------------------
-downloader=""
-for candidate in curl wget; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    downloader="$candidate"
-    break
-  fi
-done
-
-download() {
-  # download URL DEST
-  if [[ "$downloader" == "curl" ]]; then
-    curl -fsSL "$1" -o "$2"
-  else
-    wget -qO "$2" "$1"
-  fi
-}
-
-uri_exists() {
-  if [[ "$downloader" == "curl" ]]; then
-    curl -fsSIL -o /dev/null "$1" 2>/dev/null
-  else
-    wget -q --spider "$1" 2>/dev/null
-  fi
+manifest_value() {
+  # manifest_value KEY - never sources the file
+  awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$manifest"
 }
 
 sha256_of() {
@@ -199,112 +181,55 @@ sha256_of() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
   else
-    "$python_bin" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+    die "neither sha256sum nor shasum is available to verify the download"
   fi
 }
 
-# Echo the newest release tag, or fail when the repository has no releases yet.
-latest_release_tag() {
-  local effective=""
-  if [[ "$downloader" == "curl" ]]; then
-    effective="$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest" 2>/dev/null)" || return 1
-  elif [[ "$downloader" == "wget" ]]; then
-    effective="$(wget -qS --spider --max-redirect=10 "$REPO_URL/releases/latest" 2>&1 |
-      awk '/^[[:space:]]+Location: /{location=$2} END{if (location) print location}')" || return 1
+detect_kind() {
+  # A zipapp starts with its shebang; everything else is treated as a binary.
+  if [[ "$(head -c 2 "$1")" == "#!" ]]; then
+    printf 'zipapp\n'
   else
-    return 1
+    printf 'binary\n'
   fi
-  case "$effective" in
-    */releases/tag/*) printf '%s\n' "${effective##*/releases/tag/}" ;;
-    *) return 1 ;;
+}
+
+check_artifact_format() {
+  # Fail loudly on an HTML error page, or on a binary for another platform.
+  local file="$1" kind="$2" magic
+  if [[ "$kind" == "zipapp" ]]; then
+    [[ "$(head -c 2 "$file")" == "#!" ]] || die "$file is not a zipapp: it does not start with a shebang"
+    return 0
+  fi
+
+  magic="$(head -c 4 "$file" | od -An -tx1 | tr -d ' \n')"
+  case "$PLATFORM_OS" in
+    linux)
+      [[ "$magic" == "7f454c46" ]] || die "$file is not a Linux executable (magic $magic)"
+      ;;
+    macos)
+      case "$magic" in
+        cffaedfe | cefaedfe | cafebabe | cafebabf) ;;
+        *) die "$file is not a macOS executable (magic $magic)" ;;
+      esac
+      ;;
+    *)
+      warn "cannot verify the executable format for $PLATFORM_OS"
+      ;;
   esac
 }
 
-build_zipapp() {
-  # build_zipapp SRC_DIR DEST
-  local src="$1" dest="$2"
-  if [[ -f "$src/scripts/build_zipapp.py" ]]; then
-    "$python_bin" "$src/scripts/build_zipapp.py" --source "$src" --output "$dest" --quiet >/dev/null
-  else
-    local staging="$tmp_dir/staging"
-    rm -rf "$staging"
-    mkdir -p "$staging"
-    cp -R "$src/$PACKAGE_NAME" "$staging/$PACKAGE_NAME"
-    rm -rf "$staging/$PACKAGE_NAME/__pycache__"
-    rm -rf "$staging/$PACKAGE_NAME"/*/__pycache__
-    printf 'from uniservice_lib.cli import entrypoint\n\nentrypoint()\n' >"$staging/__main__.py"
-    "$python_bin" -m zipapp "$staging" -o "$dest" -p "$DEFAULT_INTERPRETER" -c
-  fi
-  chmod 0755 "$dest"
-}
-
-build_from_archive() {
-  # build_from_archive REF DEST
-  local ref="$1" dest="$2"
-  local archive="$tmp_dir/source.tar.gz"
-  local extract="$tmp_dir/src"
-  command -v tar >/dev/null 2>&1 || die "tar is required to unpack the source archive"
-
-  log "Downloading the source archive for $ref"
-  download "$REPO_URL/archive/refs/heads/$ref.tar.gz" "$archive" 2>/dev/null ||
-    download "$REPO_URL/archive/refs/tags/$ref.tar.gz" "$archive"
-
-  mkdir -p "$extract"
-  tar -xzf "$archive" -C "$extract"
-
-  # GitHub archives contain exactly one top-level directory.  A glob keeps this
-  # working with both GNU and BSD find(1).
-  local source_root="" candidate
-  for candidate in "$extract"/*/; do
-    if [[ -d "$candidate" ]]; then
-      source_root="${candidate%/}"
-      break
+require_python() {
+  # The zipapp runs on whatever python3 the invoking user's PATH resolves to.
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+      "$candidate" -c "import sys; raise SystemExit(0 if sys.version_info >= tuple(int(p) for p in '$MIN_PYTHON'.split('.')) else 1)" >/dev/null 2>&1; then
+      log "Using $("$candidate" -V 2>&1) at $(command -v "$candidate")"
+      return 0
     fi
   done
-  [[ -n "$source_root" ]] || die "unexpected archive layout"
-  build_zipapp "$source_root" "$dest"
-}
-
-resolve_artifact() {
-  # resolve_artifact DEST
-  local dest="$1"
-
-  if [[ -n "$from_dir" ]]; then
-    [[ -d "$from_dir/$PACKAGE_NAME" ]] || die "--from $from_dir does not contain $PACKAGE_NAME/"
-    log "Building from local sources: $from_dir"
-    build_zipapp "$from_dir" "$dest"
-    return 0
-  fi
-
-  if [[ -z "$downloader" ]]; then
-    die "neither curl nor wget is installed, so nothing can be downloaded (use --from DIR)"
-  fi
-
-  local tag="$version" asset
-  if [[ -n "$tag" ]]; then
-    asset="$REPO_URL/releases/download/$tag/$PROGRAM_NAME"
-    if download "$asset" "$dest" 2>/dev/null; then
-      log "Downloaded $asset"
-      return 0
-    fi
-    warn "no $PROGRAM_NAME asset in release $tag; building it from that tag's source archive"
-    build_from_archive "$tag" "$dest"
-    return 0
-  fi
-
-  if tag="$(latest_release_tag)"; then
-    asset="$REPO_URL/releases/download/$tag/$PROGRAM_NAME"
-    if download "$asset" "$dest" 2>/dev/null; then
-      log "Downloaded $asset"
-      return 0
-    fi
-    warn "release $tag has no $PROGRAM_NAME asset; building it from source"
-    build_from_archive "$tag" "$dest"
-    return 0
-  fi
-
-  warn "this repository has no releases yet; falling back to the unpinned main branch"
-  build_from_archive "main" "$dest"
+  die "the portable zipapp needs Python $MIN_PYTHON+, but no suitable python3 is on PATH; install Python, or pick the standalone binary with --binary"
 }
 
 # ---------------------------------------------------------------------------
@@ -312,72 +237,36 @@ resolve_artifact() {
 # ---------------------------------------------------------------------------
 if [[ "$uninstall" -eq 1 ]]; then
   [[ -f "$manifest" ]] || die "no installation recorded at $manifest"
-  [[ -w "$bin_dir" && -w "$lib_dir" ]] || die "cannot remove the installation under $prefix; run the installer with sudo"
-  UNISERVICE_MANIFEST="$manifest" "$python_bin" - <<'PY'
-import json
-import os
-import pathlib
 
-manifest = pathlib.Path(os.environ["UNISERVICE_MANIFEST"])
-data = json.loads(manifest.read_text(encoding="utf-8"))
+  recorded_prefix="$(manifest_value prefix)"
+  recorded_binary="$(manifest_value binary)"
+  recorded_version="$(manifest_value version)"
+  [[ -n "$recorded_prefix" ]] || recorded_prefix="$prefix"
+  [[ -n "$recorded_binary" ]] || recorded_binary="$bin_dir/$PROGRAM_NAME"
 
-removed = []
-for entry in data.get("files", []):
-    path = pathlib.Path(entry)
-    if path.is_file() or path.is_symlink():
-        path.unlink()
-        removed.append(str(path))
+  if [[ -e "$recorded_binary" ]]; then
+    [[ -w "$(dirname "$recorded_binary")" ]] || die "cannot remove $recorded_binary; run the installer with sudo"
+    rm -f "$recorded_binary"
+    log "Removed $recorded_binary"
+  fi
+  rm -f "$manifest"
 
-manifest.unlink(missing_ok=True)
+  # Prune directories that are empty now, deepest first, and only inside the
+  # recorded prefix: a wrong --prefix can therefore never delete real content.
+  # `-exec ... \;` (one at a time, not `+`) matters: find evaluates `-empty` when
+  # it visits a directory, so the child has to be gone before the parent is seen.
+  if [[ -d "$recorded_prefix" ]]; then
+    find "$recorded_prefix" -depth -type d -empty -exec rmdir {} \; 2>/dev/null || true
+    rmdir "$recorded_prefix" 2>/dev/null || true
+  fi
 
-# Prune directories that are empty now, deepest first, and only inside the
-# recorded prefix: a wrong --prefix can therefore never delete real content.
-prefix = data.get("prefix")
-if isinstance(prefix, str) and prefix:
-    root = pathlib.Path(prefix)
-    if root.is_dir():
-        directories = sorted((item for item in root.rglob("*") if item.is_dir()), key=lambda item: len(item.parts))
-        for directory in reversed(directories):
-            try:
-                directory.rmdir()
-            except OSError:
-                pass
-        try:
-            root.rmdir()
-        except OSError:
-            pass
-
-print(f"Removed {len(removed)} file(s) from the {data.get('version', 'unknown')} installation:")
-for item in removed:
-    print(f"  {item}")
-PY
-  log "OK: uninstalled uniservice from $prefix"
+  log "OK: uninstalled $PROGRAM_NAME ${recorded_version:+$recorded_version }from $recorded_prefix"
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-# Running from a checkout installs that checkout; this keeps the
-# "git clone && ./install.sh" workflow and the offline case working.
-script_dir=""
-script_source="${BASH_SOURCE[0]:-}"
-case "$script_source" in
-  "" | "-" | bash | /dev/fd/* | /proc/self/fd/* | /dev/stdin) script_dir="" ;;
-  *)
-    if [[ -f "$script_source" ]]; then
-      script_dir="$(cd "$(dirname "$script_source")" && pwd)"
-    fi
-    ;;
-esac
-if [[ -z "$from_dir" && -n "$script_dir" && -d "$script_dir/$PACKAGE_NAME" ]]; then
-  from_dir="$script_dir"
-  log "Installing from the local checkout: $from_dir"
-fi
-
-python_is_supported "$python_bin" || die "Python 3.10 or newer is required, but $python_bin is $("$python_bin" -V 2>&1)"
-
-# Fail before downloading anything: the target prefix must be writable.
 mkdir -p "$prefix" 2>/dev/null || die "cannot create $prefix; run the installer with sudo"
 [[ -w "$prefix" ]] || die "cannot write to $prefix; run the installer with sudo"
 mkdir -p "$bin_dir" "$lib_dir" 2>/dev/null || die "cannot create $bin_dir and $lib_dir; run the installer with sudo"
@@ -387,26 +276,114 @@ bin_dir="$prefix/bin"
 lib_dir="$prefix/lib/$PROGRAM_NAME"
 manifest="$lib_dir/$MANIFEST_NAME"
 
-tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t uniservice)"
-artifact="$tmp_dir/$PROGRAM_NAME"
+detect_platform
 
-log "Installing $PROGRAM_NAME into $prefix"
-resolve_artifact "$artifact"
-[[ -s "$artifact" ]] || die "the artifact is empty"
+tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t uniservice)"
+
+if [[ -n "$from_file" ]]; then
+  # A local file is an explicit choice; the format checks below guard downloads,
+  # where the real risk is an HTML error page being saved as the command.
+  [[ -f "$from_file" ]] || die "--from $from_file does not exist"
+  artifact="$from_file"
+  kind="$(detect_kind "$artifact")"
+  asset="$(basename "$artifact")"
+  log "Installing the local $kind $asset into $prefix"
+else
+  downloader=""
+  for candidate in curl wget; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      downloader="$candidate"
+      break
+    fi
+  done
+  [[ -n "$downloader" ]] || die "neither curl nor wget is installed, so nothing can be downloaded (use --from FILE)"
+
+  download() {
+    # download URL DEST
+    if [[ "$downloader" == "curl" ]]; then
+      curl -fsSL "$1" -o "$2"
+    else
+      wget -qO "$2" "$1"
+    fi
+  }
+
+  latest_release_tag() {
+    local effective=""
+    [[ "$downloader" == "curl" ]] || return 1
+    effective="$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest" 2>/dev/null)" || return 1
+    case "$effective" in
+      */releases/tag/*) printf '%s\n' "${effective##*/releases/tag/}" ;;
+      *) return 1 ;;
+    esac
+  }
+
+  release_checksum_for() {
+    # release_checksum_for TAG ASSET - prints the published digest, or nothing
+    local tag="$1" name="$2" sums="$tmp_dir/$CHECKSUM_FILE"
+    download "$REPO_URL/releases/download/$tag/$CHECKSUM_FILE" "$sums" 2>/dev/null || return 1
+    awk -v name="$name" '$2 == name || $2 == "./" name { print $1; exit }' "$sums"
+  }
+
+  if [[ "$want_binary" -eq 1 ]]; then
+    kind="binary"
+    asset="$PROGRAM_NAME-$PLATFORM_OS-$PLATFORM_ARCH"
+    if [[ "$PLATFORM_OS" == "unknown" ]]; then
+      die "no standalone binary is published for $(uname -s 2>/dev/null || echo this system); drop --binary to use the portable zipapp instead"
+    fi
+  else
+    kind="zipapp"
+    asset="$PROGRAM_NAME"
+    require_python
+  fi
+
+  log "Installing $asset ($kind) into $prefix"
+
+  tag="$version"
+  if [[ -z "$tag" ]]; then
+    if ! tag="$(latest_release_tag)"; then
+      die "could not determine the latest release from $REPO_URL; pass --version TAG"
+    fi
+    log "Latest release: $tag"
+  fi
+
+  artifact="$tmp_dir/$asset"
+  log "Downloading $REPO_URL/releases/download/$tag/$asset"
+  download "$REPO_URL/releases/download/$tag/$asset" "$artifact" || {
+    if [[ "$kind" == "binary" ]]; then
+      die "could not download $asset from release $tag; drop --binary to use the portable zipapp instead"
+    fi
+    die "could not download $asset from release $tag"
+  }
+
+  if [[ -z "$expected_sha256" ]] && published_sha256="$(release_checksum_for "$tag" "$asset")"; then
+    expected_sha256="$published_sha256"
+  fi
+fi
+
+check_artifact_format "$artifact" "$kind"
+# For a download the Python check already ran before fetching, to fail fast.
+if [[ -n "$from_file" && "$kind" == "zipapp" ]]; then
+  require_python
+fi
+# A downloaded file is not executable yet; a user-supplied one keeps its mode.
+[[ -n "$from_file" ]] || chmod 0755 "$artifact"
 
 if [[ -n "$expected_sha256" ]]; then
   actual_sha256="$(sha256_of "$artifact")"
-  if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+  [[ "$actual_sha256" == "$expected_sha256" ]] ||
     die "SHA-256 mismatch for $artifact: expected $expected_sha256, got $actual_sha256"
-  fi
   log "SHA-256 verified: $actual_sha256"
+else
+  warn "no published checksum for $asset; installing without verification"
 fi
 
-installed_version="$version"
+# Prefer the version the artifact reports over the release tag: they are the same
+# for a well-formed release, but the artifact is the truth.
+installed_version="$("$artifact" --version 2>/dev/null | awk 'NR==1{print $2}')" || true
 if [[ -z "$installed_version" ]]; then
-  installed_version="$("$python_bin" "$artifact" --version 2>/dev/null | awk 'NR==1{print $2}')" || true
-  [[ -n "$installed_version" ]] || installed_version="unknown"
+  installed_version="$version"
 fi
+[[ -n "$installed_version" ]] || installed_version="unknown"
 
 # Atomic replace: never leave a half-written executable behind.
 staged_binary="$bin_dir/.$PROGRAM_NAME.tmp.$$"
@@ -414,49 +391,28 @@ trap 'rm -f "$staged_binary"; cleanup' EXIT
 cp "$artifact" "$staged_binary"
 chmod 0755 "$staged_binary"
 mv -f "$staged_binary" "$bin_dir/$PROGRAM_NAME"
-log "Installed $bin_dir/$PROGRAM_NAME (version $installed_version)"
+log "Installed $bin_dir/$PROGRAM_NAME (version $installed_version, $kind)"
 
-# ---------------------------------------------------------------------------
-# PATH
-# ---------------------------------------------------------------------------
 # /usr/local/bin is on every account's PATH, so the installer never edits shell
 # startup files.  Only a custom --prefix can need a note.
 if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
   warn "$bin_dir is not on PATH in this shell"
 fi
 
-# ---------------------------------------------------------------------------
-# Manifest
-# ---------------------------------------------------------------------------
-UNISERVICE_MANIFEST="$manifest" \
-  UNISERVICE_VERSION="$installed_version" \
-  UNISERVICE_SHA256="$(sha256_of "$artifact")" \
-  UNISERVICE_PREFIX="$prefix" \
-  UNISERVICE_BINARY="$bin_dir/$PROGRAM_NAME" \
-  UNISERVICE_REPO="$REPO_SLUG" \
-  "$python_bin" - <<'PY'
-import datetime
-import json
-import os
-import pathlib
-
-manifest = pathlib.Path(os.environ["UNISERVICE_MANIFEST"])
-manifest.parent.mkdir(parents=True, exist_ok=True)
-data = {
-    "schema": 1,
-    "program": "uniservice",
-    "version": os.environ["UNISERVICE_VERSION"],
-    "sha256": os.environ["UNISERVICE_SHA256"],
-    "repository": os.environ["UNISERVICE_REPO"],
-    "prefix": os.environ["UNISERVICE_PREFIX"],
-    "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-    "files": [os.environ["UNISERVICE_BINARY"]],
-}
-manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-PY
+{
+  printf 'schema=1\n'
+  printf 'program=%s\n' "$PROGRAM_NAME"
+  printf 'kind=%s\n' "$kind"
+  printf 'version=%s\n' "$installed_version"
+  printf 'asset=%s\n' "$asset"
+  printf 'sha256=%s\n' "$(sha256_of "$artifact")"
+  printf 'prefix=%s\n' "$prefix"
+  printf 'binary=%s\n' "$bin_dir/$PROGRAM_NAME"
+  printf 'installed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} >"$manifest"
 
 log ""
-log "OK: installed $PROGRAM_NAME $installed_version"
+log "OK: installed $PROGRAM_NAME $installed_version ($kind)"
 log "Hint: $PROGRAM_NAME --help"
 log "Note: one installation serves both scopes: '$PROGRAM_NAME ...' for user services,"
 log "      'sudo $PROGRAM_NAME ...' for system services."

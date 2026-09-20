@@ -33,7 +33,17 @@ DEFAULT_OUTPUT = "uniservice"
 ZIP_EPOCH = 315532800  # 1980-01-01T00:00:00Z
 
 #: Copied into the archive so that ``python uniservice`` executes the CLI.
+#: The zipapp runs on whatever ``python3`` the invoking user's PATH resolves to,
+#: so it checks the version itself and fails with a message that names the
+#: interpreter instead of raising a bare SyntaxError from somewhere inside.
 MAIN_MODULE = """\
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit(
+        f"uniservice requires Python 3.10+, but this is {sys.version.split()[0]} at {sys.executable}"
+    )
+
 from uniservice_lib.cli import entrypoint
 
 entrypoint()

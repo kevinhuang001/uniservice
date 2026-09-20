@@ -3,30 +3,36 @@
   Install the uniservice command for the current user.
 
 .DESCRIPTION
-  Installs a single self-contained `uniservice.pyz` (the same artifact used on
-  Linux and macOS) under %LOCALAPPDATA%\uniservice\bin together with a
-  `uniservice.cmd` shim, and records the installation in install.json so that
-  -Uninstall can undo it exactly.
+  Every release publishes two artifacts and this installer lets you pick:
+
+    (default)  the portable zipapp  - one ~30 KB file, needs Python 3.10+
+    -Binary    the standalone binary - bundles CPython, needs no Python (~24 MB)
+
+  The zipapp is the recommended default. Either way the command lands in
+  %LOCALAPPDATA%\uniservice\bin and the installation is recorded in a manifest
+  so -Uninstall can undo it exactly.
 
   `uniservice list` works in any shell; every other command creates or changes a
   Scheduled Task that runs as SYSTEM and therefore needs an elevated shell.
 
-  Alternative: pipx install uniservice  (or: irm ... | iex -Pipx)
+.PARAMETER Binary
+  Install the standalone binary instead of the portable zipapp.
 
 .PARAMETER Prefix
   Install under this directory instead of %LOCALAPPDATA%\uniservice.
 
 .PARAMETER Version
-  Install a specific release tag, for example -Version v1.2.0.
+  Release to install, for example -Version v1.2.0. Default: the latest release.
 
 .PARAMETER Sha256
-  Verify the downloaded artifact against this SHA-256 digest.
+  Verify the artifact against this SHA-256 digest. By default the digest
+  published in SHA256SUMS is used.
+
+.PARAMETER From
+  Install a local zipapp or .exe instead of downloading one.
 
 .PARAMETER NoModifyPath
   Never edit PATH (user environment or PowerShell profile).
-
-.PARAMETER Pipx
-  Install through pipx instead of the portable layout.
 
 .PARAMETER Uninstall
   Remove a previous installation recorded in the manifest.
@@ -35,15 +41,19 @@
   iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
 
 .EXAMPLE
+  ./install-windows.ps1 -Binary -Version v1.2.0
+
+.EXAMPLE
   ./install-windows.ps1 -Uninstall
 #>
 [CmdletBinding()]
 param(
+  [switch]$Binary,
   [string]$Prefix = '',
   [string]$Version = '',
   [string]$Sha256 = '',
+  [string]$From = '',
   [switch]$NoModifyPath,
-  [switch]$Pipx,
   [switch]$Uninstall
 )
 
@@ -54,10 +64,11 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $RepoSlug = if ($env:UNISERVICE_REPO_SLUG) { $env:UNISERVICE_REPO_SLUG } else { 'kevinhuang001/uniservice' }
-$RepoUrl = "https://github.com/$RepoSlug"
+$RepoUrl = if ($env:UNISERVICE_REPO_URL) { $env:UNISERVICE_REPO_URL } else { "https://github.com/$RepoSlug" }
 $ProgramName = 'uniservice'
-$PackageName = 'uniservice_lib'
-$ManifestName = 'install.json'
+$ManifestName = 'manifest'
+$ChecksumFile = 'SHA256SUMS'
+$MinPython = '3.10'
 
 try {
   $current = [Net.ServicePointManager]::SecurityProtocol
@@ -68,24 +79,16 @@ function Write-Step { param([string]$Message) Write-Host $Message }
 function Write-Note { param([string]$Message) Write-Host "WARNING: $Message" -ForegroundColor Yellow }
 function Fail { param([string]$Message) throw "uniservice installer: $Message" }
 
-function Get-PythonCommand {
-  $py = Get-Command py -ErrorAction SilentlyContinue
-  if ($py) {
-    & py -3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
-    if ($LASTEXITCODE -eq 0) { return @{ File = 'py'; PrefixArgs = @('-3') } }
+function Get-AssetName {
+  param([switch]$Standalone)
+  if (-not $Standalone) { return $ProgramName }  # the portable zipapp
+  $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+    'AMD64' { 'x86_64' }
+    'ARM64' { 'arm64' }
+    'x86' { 'x86' }
+    default { $env:PROCESSOR_ARCHITECTURE.ToLowerInvariant() }
   }
-  $python = Get-Command python -ErrorAction SilentlyContinue
-  if ($python) {
-    & python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
-    if ($LASTEXITCODE -eq 0) { return @{ File = 'python'; PrefixArgs = @() } }
-  }
-  return $null
-}
-
-function Show-PythonHint {
-  Write-Host 'Python 3.10+ is required but was not found. Please install it first:' -ForegroundColor Yellow
-  Write-Host '  - https://www.python.org/downloads/windows/'
-  Write-Host '  - Or search for Python in the Microsoft Store'
+  return "$ProgramName-windows-$arch.exe"
 }
 
 function Save-File {
@@ -105,72 +108,30 @@ function Get-LatestReleaseTag {
   return $null
 }
 
-function Expand-SourceArchive {
-  param([string]$Ref, [string]$WorkDir)
-  $zipPath = Join-Path $WorkDir 'source.zip'
-  Write-Step "Downloading the source archive for $Ref"
+function Get-ReleaseChecksum {
+  param([string]$Tag, [string]$Asset, [string]$WorkDir)
+  $sums = Join-Path $WorkDir $ChecksumFile
   try {
-    Save-File -Uri "$RepoUrl/archive/refs/heads/$Ref.zip" -Destination $zipPath
+    Save-File -Uri "$RepoUrl/releases/download/$Tag/$ChecksumFile" -Destination $sums
   } catch {
-    Save-File -Uri "$RepoUrl/archive/refs/tags/$Ref.zip" -Destination $zipPath
+    return ''
   }
-
-  $extractDir = Join-Path $WorkDir 'src'
-  New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-  if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
-    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
-  } else {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractDir)
+  foreach ($line in Get-Content -LiteralPath $sums) {
+    $parts = $line -split '\s+', 2
+    if ($parts.Count -eq 2 -and $parts[1].Trim() -eq $Asset) { return $parts[0].Trim() }
   }
-
-  $candidate = Get-ChildItem -LiteralPath $extractDir -Directory |
-    Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName $PackageName) } |
-    Select-Object -First 1
-  if (-not $candidate) { Fail 'unexpected source archive layout' }
-  return $candidate.FullName
+  return ''
 }
 
-function New-Zipapp {
-  param([string]$SourceDir, [string]$Destination, [hashtable]$PythonCommand)
-  $builder = Join-Path $SourceDir 'scripts\build_zipapp.py'
-  $prefixArgs = $PythonCommand.PrefixArgs
-  if (Test-Path -LiteralPath $builder) {
-    & $PythonCommand.File @prefixArgs $builder --source $SourceDir --output $Destination --quiet | Out-Null
-  } else {
-    & $PythonCommand.File @prefixArgs -m zipapp $SourceDir -o $Destination -c
+function Test-PythonAvailable {
+  foreach ($candidate in @('py', 'python')) {
+    $command = Get-Command $candidate -ErrorAction SilentlyContinue
+    if (-not $command) { continue }
+    $args = if ($candidate -eq 'py') { @('-3', '-c') } else { @('-c') }
+    & $candidate @args 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+    if ($LASTEXITCODE -eq 0) { return $true }
   }
-  if ($LASTEXITCODE -ne 0) { Fail "could not build the zipapp from $SourceDir" }
-}
-
-function Resolve-Artifact {
-  param([string]$Destination, [string]$WorkDir, [hashtable]$PythonCommand)
-
-  $tag = $Version
-  if (-not $tag) {
-    $tag = Get-LatestReleaseTag
-    if ($tag) {
-      Write-Step "Latest release: $tag"
-    } else {
-      Write-Note 'this repository has no releases yet; falling back to the unpinned main branch'
-    }
-  }
-
-  if ($tag) {
-    $asset = "$RepoUrl/releases/download/$tag/$ProgramName"
-    try {
-      Save-File -Uri $asset -Destination $Destination
-      Write-Step "Downloaded $asset"
-      return $tag
-    } catch {
-      Write-Note "no $ProgramName asset in release $tag; building it from that tag's source archive"
-    }
-  }
-
-  $ref = if ($tag) { $tag } else { 'main' }
-  $sourceDir = Expand-SourceArchive -Ref $ref -WorkDir $WorkDir
-  New-Zipapp -SourceDir $sourceDir -Destination $Destination -PythonCommand $PythonCommand
-  return $ref
+  return $false
 }
 
 function Get-ManifestPath {
@@ -178,74 +139,60 @@ function Get-ManifestPath {
   return (Join-Path $TargetPrefix $ManifestName)
 }
 
+function Read-Manifest {
+  param([string]$Path)
+  $values = @{}
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    $parts = $line -split '=', 2
+    if ($parts.Count -eq 2) { $values[$parts[0]] = $parts[1] }
+  }
+  return $values
+}
+
 function Invoke-Uninstall {
   param([string]$TargetPrefix)
   $manifestPath = Get-ManifestPath -TargetPrefix $TargetPrefix
-  $removedSomething = $false
-
-  if (Test-Path -LiteralPath $manifestPath) {
-    $data = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    foreach ($entry in @($data.files)) {
-      if ($entry -and (Test-Path -LiteralPath $entry)) {
-        Remove-Item -Force -LiteralPath $entry
-        Write-Step "Removed $entry"
-        $removedSomething = $true
-      }
-    }
-    Remove-Item -Force -LiteralPath $manifestPath -ErrorAction SilentlyContinue
-
-    # Prune directories that are empty now, deepest first, and only inside the
-    # recorded prefix: a wrong -Prefix can therefore never delete real content.
-    if ($data.prefix -and (Test-Path -LiteralPath $data.prefix)) {
-      Get-ChildItem -LiteralPath $data.prefix -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-        Sort-Object { $_.FullName.Length } -Descending |
-        ForEach-Object {
-          if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue)) {
-            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-          }
-        }
-      if (-not (Get-ChildItem -LiteralPath $data.prefix -Force -ErrorAction SilentlyContinue)) {
-        Remove-Item -LiteralPath $data.prefix -Force -ErrorAction SilentlyContinue
-      }
-    }
-    if ($data.profile_managed) {
-      Write-Note "the PowerShell profile may still contain a PATH line for uniservice: $($data.profile)"
-    }
-  }
-
-  $pipx = Get-Command pipx -ErrorAction SilentlyContinue
-  if ($pipx) {
-    & pipx uninstall $ProgramName 2>$null
-    if ($LASTEXITCODE -eq 0) { $removedSomething = $true }
-    # A "package not installed" failure must not leak into the script's exit code.
-    $global:LASTEXITCODE = 0
-  }
-
-  if ($removedSomething) {
-    Write-Step 'OK: uninstalled uniservice'
-  } else {
+  if (-not (Test-Path -LiteralPath $manifestPath)) {
     Write-Note "nothing was removed: no installation manifest at $manifestPath"
+    return
   }
+
+  $data = Read-Manifest -Path $manifestPath
+  foreach ($key in @('binary', 'shim')) {
+    if ($data.ContainsKey($key) -and $data[$key] -and (Test-Path -LiteralPath $data[$key])) {
+      Remove-Item -Force -LiteralPath $data[$key]
+      Write-Step "Removed $($data[$key])"
+    }
+  }
+  Remove-Item -Force -LiteralPath $manifestPath -ErrorAction SilentlyContinue
+
+  # Prune directories that are empty now, deepest first, and only inside the
+  # recorded prefix: a wrong -Prefix can therefore never delete real content.
+  $recordedPrefix = if ($data.ContainsKey('prefix') -and $data['prefix']) { $data['prefix'] } else { $TargetPrefix }
+  if (Test-Path -LiteralPath $recordedPrefix) {
+    Get-ChildItem -LiteralPath $recordedPrefix -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+      Sort-Object { $_.FullName.Length } -Descending |
+      ForEach-Object {
+        if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue)) {
+          Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+      }
+    if (-not (Get-ChildItem -LiteralPath $recordedPrefix -Force -ErrorAction SilentlyContinue)) {
+      Remove-Item -LiteralPath $recordedPrefix -Force -ErrorAction SilentlyContinue
+    }
+  }
+  Write-Step "OK: uninstalled $ProgramName from $recordedPrefix"
 }
 
-function Invoke-PipxInstall {
-  $pipx = Get-Command pipx -ErrorAction SilentlyContinue
-  if (-not $pipx) {
-    Fail 'pipx is not installed; see https://pipx.pypa.io/ or drop -Pipx'
-  }
-  & pipx install --force "$RepoUrl/archive/refs/heads/main.tar.gz"
-  if ($LASTEXITCODE -ne 0) { Fail 'pipx install failed' }
-  Write-Step 'OK: installed uniservice with pipx'
-  Write-Step "Hint: run 'uniservice --help' (add pipx's bin directory to PATH if needed)"
-}
-
-function Invoke-PortableInstall {
+function Invoke-Install {
   param([string]$TargetPrefix)
 
-  $pythonCommand = Get-PythonCommand
-  if (-not $pythonCommand) {
-    Show-PythonHint
-    Fail 'Python 3.10+ is required'
+  $standalone = [bool]$Binary
+  $asset = Get-AssetName -Standalone:$standalone
+  $kind = if ($standalone) { 'binary' } else { 'zipapp' }
+
+  if (-not $standalone -and -not (Test-PythonAvailable)) {
+    Fail "the portable zipapp needs Python $MinPython+; install Python, or pick the standalone binary with -Binary"
   }
 
   $binDir = Join-Path $TargetPrefix 'bin'
@@ -255,47 +202,74 @@ function Invoke-PortableInstall {
   New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
   try {
-    $artifact = Join-Path $workDir "$ProgramName.pyz"
-    $resolvedVersion = Resolve-Artifact -Destination $artifact -WorkDir $workDir -PythonCommand $pythonCommand
+    if ($From) {
+      if (-not (Test-Path -LiteralPath $From)) { Fail "$From does not exist" }
+      $artifact = (Resolve-Path -LiteralPath $From).Path
+      $asset = Split-Path -Leaf $artifact
+      # A zipapp starts with '#!'; read the bytes rather than a line of a binary.
+      $head = [System.IO.File]::ReadAllBytes($artifact)
+      $kind = if ($head.Length -ge 2 -and $head[0] -eq 0x23 -and $head[1] -eq 0x21) { 'zipapp' } else { 'binary' }
+      Write-Step "Installing the local $kind $asset into $TargetPrefix"
+    } else {
+      $tag = $Version
+      if (-not $tag) {
+        $tag = Get-LatestReleaseTag
+        if (-not $tag) { Fail "could not determine the latest release from $RepoUrl; pass -Version TAG" }
+        Write-Step "Latest release: $tag"
+      }
+
+      $artifact = Join-Path $workDir $asset
+      Write-Step "Downloading $RepoUrl/releases/download/$tag/$asset"
+      try {
+        Save-File -Uri "$RepoUrl/releases/download/$tag/$asset" -Destination $artifact
+      } catch {
+        if ($standalone) { Fail "could not download $asset from release $tag; drop -Binary to use the portable zipapp instead" }
+        Fail "could not download $asset from release $tag"
+      }
+
+      if (-not $Sha256) { $Sha256 = Get-ReleaseChecksum -Tag $tag -Asset $asset -WorkDir $workDir }
+    }
 
     if ($Sha256) {
       $actual = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
       if ($actual -ne $Sha256.ToLowerInvariant()) {
-        Fail "SHA-256 mismatch: expected $Sha256, got $actual"
+        Fail "SHA-256 mismatch for $artifact`: expected $Sha256, got $actual"
       }
       Write-Step "SHA-256 verified: $actual"
+    } elseif (-not $From) {
+      Write-Note "no published checksum for $asset; installing without verification"
     }
 
     $installedVersion = $Version
-    if (-not $installedVersion) {
-      $prefixArgs = $pythonCommand.PrefixArgs
-      $output = (& $pythonCommand.File @prefixArgs $artifact --version 2>$null | Out-String).Trim()
-      if ($output -match '(\S+)\s*$') { $installedVersion = $Matches[1] }
+    if (-not $installedVersion) { $installedVersion = 'unknown' }
+
+    $shim = ''
+    if ($kind -eq 'binary') {
+      $target = Join-Path $binDir "$ProgramName.exe"
+      Copy-Item -LiteralPath $artifact -Destination $target -Force
+    } else {
+      $target = Join-Path $binDir "$ProgramName.pyz"
+      Copy-Item -LiteralPath $artifact -Destination $target -Force
+      $shim = Join-Path $binDir "$ProgramName.cmd"
+      $shimContent = @(
+        '@echo off'
+        'setlocal'
+        'where py >nul 2>nul'
+        'if %errorlevel%==0 ('
+        '  py -3 "%~dp0uniservice.pyz" %*'
+        '  exit /b %errorlevel%'
+        ')'
+        'where python >nul 2>nul'
+        'if %errorlevel%==0 ('
+        '  python "%~dp0uniservice.pyz" %*'
+        '  exit /b %errorlevel%'
+        ')'
+        'echo Python 3 not found. Please install it from https://www.python.org/downloads/windows/'
+        'exit /b 1'
+      ) -join "`r`n"
+      Set-Content -LiteralPath $shim -Value $shimContent -Encoding ASCII
     }
-    if (-not $installedVersion) { $installedVersion = $resolvedVersion }
-
-    $targetPyz = Join-Path $binDir "$ProgramName.pyz"
-    Copy-Item -LiteralPath $artifact -Destination $targetPyz -Force
-
-    $shim = Join-Path $binDir "$ProgramName.cmd"
-    $shimContent = @(
-      '@echo off'
-      'setlocal'
-      'where py >nul 2>nul'
-      'if %errorlevel%==0 ('
-      '  py -3 "%~dp0uniservice.pyz" %*'
-      '  exit /b %errorlevel%'
-      ')'
-      'where python >nul 2>nul'
-      'if %errorlevel%==0 ('
-      '  python "%~dp0uniservice.pyz" %*'
-      '  exit /b %errorlevel%'
-      ')'
-      'echo Python 3 not found. Please install it from https://www.python.org/downloads/windows/'
-      'exit /b 1'
-    ) -join "`r`n"
-    Set-Content -LiteralPath $shim -Value $shimContent -Encoding ASCII
-    Write-Step "Installed $shim (version $installedVersion)"
+    Write-Step "Installed $target (version $installedVersion, $kind)"
 
     $profilePath = $null
     if (-not $NoModifyPath -and -not $Prefix) {
@@ -327,22 +301,22 @@ if (`$env:Path -notlike "*`$uniserviceBin*") { `$env:Path = `$env:Path + ';' + `
       Write-Step "Note: add $binDir to PATH yourself (custom -Prefix)"
     }
 
-    $manifest = [ordered]@{
-      schema          = 1
-      program         = $ProgramName
-      version         = $installedVersion
-      repository      = $RepoSlug
-      prefix          = $TargetPrefix
-      installed_at    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-      files           = @($targetPyz, $shim)
-      profile         = $profilePath
-      profile_managed = [bool]$profilePath
-    }
-    Set-Content -LiteralPath (Get-ManifestPath -TargetPrefix $TargetPrefix) `
-      -Value ($manifest | ConvertTo-Json -Depth 4) -Encoding UTF8
+    $lines = @(
+      'schema=1'
+      "program=$ProgramName"
+      "kind=$kind"
+      "version=$installedVersion"
+      "asset=$asset"
+      "sha256=$((Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant())"
+      "prefix=$TargetPrefix"
+      "binary=$target"
+      "shim=$shim"
+      "installed_at=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+    )
+    Set-Content -LiteralPath (Get-ManifestPath -TargetPrefix $TargetPrefix) -Value $lines -Encoding UTF8
 
     Write-Step ''
-    Write-Step "OK: installed $ProgramName $installedVersion"
+    Write-Step "OK: installed $ProgramName $installedVersion ($kind)"
     Write-Step "Hint: reopen PowerShell/CMD, then run: $ProgramName --help"
     Write-Step ''
     Write-Step "Note: $ProgramName creates Scheduled Tasks that run as SYSTEM, so 'add',"
@@ -356,17 +330,12 @@ if (`$env:Path -notlike "*`$uniserviceBin*") { `$env:Path = `$env:Path + ';' + `
 }
 
 function Invoke-Main {
-  $portablePrefix = if ($Prefix) { $Prefix } else { Join-Path $env:LOCALAPPDATA 'uniservice' }
-
+  $targetPrefix = if ($Prefix) { $Prefix } else { Join-Path $env:LOCALAPPDATA 'uniservice' }
   if ($Uninstall) {
-    Invoke-Uninstall -TargetPrefix $portablePrefix
+    Invoke-Uninstall -TargetPrefix $targetPrefix
     return
   }
-  if ($Pipx) {
-    Invoke-PipxInstall
-    return
-  }
-  Invoke-PortableInstall -TargetPrefix $portablePrefix
+  Invoke-Install -TargetPrefix $targetPrefix
 }
 
 Invoke-Main

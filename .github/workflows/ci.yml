@@ -30,6 +30,92 @@ jobs:
       - name: ruff format
         run: ruff format --check --diff .
 
+  zipapp:
+    name: Package (zipapp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build twice and compare
+        run: |
+          set -euo pipefail
+          python scripts/build_zipapp.py --output build/a/uniservice
+          python scripts/build_zipapp.py --output build/b/uniservice
+          cmp build/a/uniservice build/b/uniservice
+          echo "the zipapp build is reproducible"
+      - name: Smoke test the artifact
+        run: |
+          set -euo pipefail
+          build/a/uniservice --version
+          build/a/uniservice list
+          test -x build/a/uniservice
+
+  binaries:
+    name: Binary (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm }
+          - { name: macos-arm64, os: macos-latest }
+          - { name: macos-x86_64, os: macos-15-intel }
+          - { name: windows-x86_64, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+      - name: Install binutils (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y binutils
+      - name: Build the standalone binary
+        run: python scripts/build_binary.py --output-dir dist
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist/uniservice-* --version
+          dist/uniservice-* list
+      - name: Install it with install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$(mktemp -d)/uniservice"
+          ./install.sh --prefix "$prefix" --from dist/uniservice-*
+          "$prefix/bin/uniservice" --version
+          ./install.sh --uninstall --prefix "$prefix"
+      - name: Install it with install-windows.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try {
+            $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-binary'
+            $artifact = (Get-ChildItem dist\uniservice-*.exe).FullName
+            ./install-windows.ps1 -From $artifact -Prefix $prefix -NoModifyPath
+            & (Join-Path $prefix 'bin\uniservice.exe') --version
+            ./install-windows.ps1 -Uninstall -Prefix $prefix
+            if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
+            Write-Host 'standalone binary install/uninstall OK'
+          } catch {
+            $message = ($_ | Out-String).Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            [Console]::WriteLine("::error title=windows binary install::$message")
+            [Console]::Out.Flush()
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/uniservice-*
+          if-no-files-found: error
+
   installers:
     name: Installers (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -47,6 +133,8 @@ jobs:
         run: shellcheck install.sh
       - name: bash syntax
         run: bash -n install.sh
+      - name: Build the zipapp to install
+        run: python scripts/build_zipapp.py --output build/uniservice --quiet
       - name: Refuses to install without permission
         run: |
           set -euo pipefail
@@ -57,34 +145,27 @@ jobs:
           fi
           grep -q "sudo" installer.log
           test ! -e /usr/local/bin/uniservice
-      - name: Installs to the default prefix with sudo
+      - name: Installs the recommended zipapp into /usr/local with sudo
         run: |
           set -euo pipefail
-          sudo ./install.sh
+          sudo ./install.sh --from "$PWD/build/uniservice"
           trap 'sudo ./install.sh --uninstall || true' EXIT
           command -v uniservice
           uniservice --version
           uniservice list
-          test -f /usr/local/lib/uniservice/install.json
+          test -f /usr/local/lib/uniservice/manifest
+          grep -q '^kind=zipapp$' /usr/local/lib/uniservice/manifest
           sudo ./install.sh --uninstall
           test ! -e /usr/local/bin/uniservice
           trap - EXIT
-      - name: Install and uninstall round trip into a custom prefix
+      - name: Custom prefix round trip
         run: |
           set -euo pipefail
           prefix="$(mktemp -d)/uniservice"
-          ./install.sh --prefix "$prefix"
+          ./install.sh --prefix "$prefix" --from "$PWD/build/uniservice"
           "$prefix/bin/uniservice" --version
           "$prefix/bin/uniservice" list
-          python - "$prefix/lib/uniservice/install.json" <<'PY'
-          import json, sys
-          data = json.load(open(sys.argv[1], encoding="utf-8"))
-          assert data["version"], data
-          assert len(data["sha256"]) == 64, data
-          assert data["files"], data
-          assert "profile_files" not in data, data
-          print("manifest OK:", data["version"], data["sha256"][:12])
-          PY
+          grep -q '^schema=1$' "$prefix/lib/uniservice/manifest"
           ./install.sh --uninstall --prefix "$prefix"
           test ! -e "$prefix/bin/uniservice"
 
@@ -108,79 +189,11 @@ jobs:
             exit 1
           }
           Write-Host 'install-windows.ps1 parses cleanly'
-      - name: Exercise the installer
+      - name: Uninstall with no manifest is handled
         shell: pwsh
         run: |
-          $PSNativeCommandUseErrorActionPreference = $false
-
-          # Job logs need repository admin rights to download, so failures are
-          # reported through check annotations instead.  [Console]::WriteLine is
-          # used because Write-Host output is not parsed as a workflow command.
-          function Write-Annotation {
-            param([string]$Title, [string]$Detail)
-            $encoded = $Detail.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
-            [Console]::WriteLine("::error title=$Title::$encoded")
-            [Console]::Out.Flush()
-          }
-
-          function Invoke-InstallerScript {
-            param([string[]]$InstallerArgs)
-            Write-Host ">>> install-windows.ps1 $($InstallerArgs -join ' ')"
-            $output = & pwsh -NoProfile -File ./install-windows.ps1 @InstallerArgs 2>&1 | Out-String
-            $code = $LASTEXITCODE
-            Write-Host $output
-            if ($code -ne 0) {
-              Write-Annotation -Title 'install-windows.ps1' -Detail "exit code $code`n$output"
-              throw "install-windows.ps1 exited $code"
-            }
-          }
-
-          try {
-            Invoke-InstallerScript @('-Uninstall', '-Prefix', (Join-Path $env:RUNNER_TEMP 'uniservice-none')) | Out-Null
-
-            $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-test'
-            Invoke-InstallerScript @('-Prefix', $prefix, '-NoModifyPath') | Out-Null
-
-            $shim = Join-Path $prefix 'bin\uniservice.cmd'
-            if (-not (Test-Path -LiteralPath $shim)) { throw "missing $shim" }
-            & $shim --version
-            if ($LASTEXITCODE -ne 0) { throw "uniservice.cmd --version returned $LASTEXITCODE" }
-
-            $data = Get-Content -LiteralPath (Join-Path $prefix 'install.json') -Raw | ConvertFrom-Json
-            if (-not $data.version) { throw 'the manifest has no version' }
-            Write-Host "manifest version: $($data.version), files: $($data.files.Count)"
-
-            Invoke-InstallerScript @('-Uninstall', '-Prefix', $prefix) | Out-Null
-            if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
-            Write-Host 'portable install/uninstall round trip OK'
-          } catch {
-            Write-Annotation -Title 'windows installer' -Detail ($_ | Out-String)
-            throw
-          }
-
-          exit 0
-
-  package:
-    name: Package (zipapp)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Build twice and compare
-        run: |
-          set -euo pipefail
-          python scripts/build_zipapp.py --output build/a/uniservice
-          python scripts/build_zipapp.py --output build/b/uniservice
-          cmp build/a/uniservice build/b/uniservice
-          echo "the zipapp build is reproducible"
-      - name: Smoke test the artifact
-        run: |
-          set -euo pipefail
-          build/a/uniservice --version
-          build/a/uniservice list
-          test -x build/a/uniservice
+          ./install-windows.ps1 -Uninstall -Prefix (Join-Path $env:TEMP 'uniservice-does-not-exist')
+          Write-Host 'uninstall without a manifest exits cleanly'
 
   test:
     name: Test (${{ matrix.os }} / Python ${{ matrix.python-version }})

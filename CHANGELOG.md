@@ -3,10 +3,39 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.3.0] - 2026-09-20
+
+### Added
+
+- **A second distribution artifact.** Besides the portable zipapp, every release now publishes a
+  standalone binary built with PyInstaller (`scripts/build_binary.py`, `packaging/entrypoint.py`).
+  It bundles its own CPython, so it needs no Python on the target machine and always runs on
+  exactly the interpreter that was verified when it was packaged - which removes the "which
+  python3 does this run on?" ambiguity of the zipapp. It is ~24 MB, starts in ~257 ms instead of
+  ~38 ms, and PyInstaller cannot cross-compile, so the release builds one asset per platform:
+  `uniservice-linux-x86_64`, `uniservice-linux-aarch64`, `uniservice-macos-arm64`,
+  `uniservice-macos-x86_64` and `uniservice-windows-x86_64.exe`.
+- `install.sh --binary` installs that standalone binary; the default stays the zipapp, which is
+  smaller and runs on the Python you already have. `install-windows.ps1` gained `-Binary` in the
+  same spirit. When a release has no asset for the current platform, `--binary` says so and
+  points at the zipapp.
+- `UNISERVICE_REPO_URL` makes the installer point at a mirror or a `file://` tree, which is also
+  how the installer tests exercise downloads offline.
+- The zipapp now checks `sys.version_info` before importing anything and exits with
+  `uniservice requires Python 3.10+, but this is 3.9.2 at /usr/bin/python3` instead of failing
+  somewhere inside with a `SyntaxError`.
 
 ### Changed
 
+- The installer no longer needs Python at all: it writes the manifest as `key=value`
+  (`schema`, `program`, `kind`, `version`, `asset`, `sha256`, `prefix`, `binary`, `installed_at`)
+  instead of JSON, and never shells out to an interpreter. `--from` now takes an already built
+  zipapp or binary rather than building one from source.
+- Every download is verified when the release publishes a `SHA256SUMS` entry for the asset, and a
+  downloaded artifact is checked for the platform's executable magic (ELF / Mach-O) or a zipapp
+  shebang before it can be installed, so an error page can never land in `/usr/local/bin`.
+- CI builds the standalone binary for all five targets on every push, so the matrix cannot rot
+  between releases.
 - macOS: dropped the `launchctl load -w` / `unload -w` fallback from `start()` and `stop()`. Those
   are the pre-10.10 launchctl subcommands, and uniservice now only uses the supported interface:
   `launchctl bootstrap` to register and `launchctl bootout` to unregister. `start` reports the

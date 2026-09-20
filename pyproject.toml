@@ -28,6 +28,9 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.5"]
+# Building the standalone binaries: `python scripts/build_binary.py`. PyInstaller
+# cannot cross-compile, so it has to run on each target OS/architecture.
+build = ["pyinstaller>=6.0"]
 
 [project.scripts]
 uniservice = "uniservice_lib.cli:entrypoint"

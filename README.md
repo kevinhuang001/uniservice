@@ -14,58 +14,84 @@ Requires **Python 3.10+**. No third-party runtime dependencies.
 
 ## Install
 
-`uniservice` ships as **one self-contained executable file** (a Python zipapp, ~30 KB, no
-dependencies beyond Python 3.10+). Having a single file is what lets *one* installation serve
-both scopes: the same `/usr/local/bin/uniservice` runs as you (per-user services) and through
-`sudo` (system services).
+Every release publishes **two artifacts**, and the installer lets you pick one:
 
-The installer therefore installs to **`/usr/local` and nothing else**. `/usr/local/bin` is
-already on `PATH` for every account, so it never edits a shell profile; it records what it
-created in a manifest and can undo the installation exactly.
+| | Artifact | Size | Requires |
+| --- | --- | --- | --- |
+| **default** | portable zipapp | ~30 KB | Python 3.10+ on the machine |
+| `--binary` | standalone binary | ~24 MB | nothing (bundles its own CPython) |
 
-Writing to `/usr/local` needs root, and the installer does not silently fall back somewhere
-else: **run it with `sudo` or it stops with an error**. No `~/.local` install, no PATH edits.
+**The zipapp is the recommended default**: one small file that is byte-identical on every
+platform, and it runs on the Python you already have. The standalone binary exists for machines
+with no Python environment; because PyInstaller cannot cross-compile, it is built and published
+separately for each OS and CPU architecture.
+
+Either way the command lands in `/usr/local/bin/uniservice` and is recorded in
+`/usr/local/lib/uniservice/manifest`. `/usr/local/bin` is already on `PATH` for every account, so
+the installer never edits a shell profile, and one installation serves both scopes:
+`uniservice ...` for per-user services and `sudo uniservice ...` for system services.
+
+Writing to `/usr/local` needs root, and the installer does not silently fall back somewhere else:
+**run it with `sudo` or it stops with an error**. No `~/.local` install, no PATH edits.
 
 ### One-liner
 
 ```bash
-# macOS / Linux
+# macOS / Linux — the recommended portable zipapp (needs Python 3.10+)
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
+
+# ... or the standalone binary, which needs no Python at all
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash -s -- --binary
 ```
 
 ```powershell
-# Windows — portable layout under %LOCALAPPDATA%\uniservice\bin
+# Windows — portable zipapp (needs Python 3.10+), then the standalone .exe
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
+./install-windows.ps1 -Binary
 ```
 
 ### Installer options
 
 ```
+--binary               install the standalone binary instead of the zipapp
 --prefix DIR           install under DIR instead of /usr/local
                        (for packaging and tests; needs no elevated privileges)
 --version TAG          install a specific release, e.g. --version v1.2.0
---sha256 HEX           verify the downloaded artifact against this digest
---from DIR             build from a local checkout instead of downloading
+--sha256 HEX           verify the artifact against this digest
+                       (by default the digest published in SHA256SUMS is used)
+--from FILE            install a local zipapp or binary instead of downloading
 --uninstall            remove a previous installation, using its manifest
 ```
 
 ```bash
-sudo ./install.sh --version v1.2.0 --sha256 "$(awk '{print $1}' uniservice.sha256)"
-./install.sh --prefix /tmp/uniservice-test      # unprivileged, for packaging/tests
+sudo ./install.sh                                  # recommended: the zipapp
+sudo ./install.sh --binary                         # no Python needed
+sudo ./install.sh --version v1.2.0                 # pin a release
+./install.sh --prefix /tmp/uniservice-test         # unprivileged, for packaging/tests
 sudo ./install.sh --uninstall
 ```
 
-Each release publishes `uniservice` (the zipapp), a wheel, an sdist and `SHA256SUMS`; the
-zipapp build is byte-for-byte reproducible, so pinning a `--sha256` gives a verifiable
-install. When the repository has no release yet the installer falls back to building the
-`main` branch archive locally and says so.
+The zipapp build is byte-for-byte reproducible, so pinning a `--sha256` gives a verifiable
+install. When a release has no asset for your platform the installer says so and points at the
+zipapp alternative.
+
+### Release assets
+
+| Asset | Notes |
+| --- | --- |
+| `uniservice` | the portable zipapp (recommended) |
+| `uniservice-linux-x86_64`, `uniservice-linux-aarch64` | standalone binaries |
+| `uniservice-macos-arm64`, `uniservice-macos-x86_64` | standalone binaries |
+| `uniservice-windows-x86_64.exe` | standalone binary |
+| `uniservice-<version>-py3-none-any.whl`, `.tar.gz` | for `pipx` / `pip` |
+| `SHA256SUMS` | digests for everything above |
 
 ### Verify the checksum yourself
 
 ```bash
-curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice
-curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice.sha256
-sha256sum -c uniservice.sha256
+base=https://github.com/kevinhuang001/uniservice/releases/latest/download
+curl -fsSLO "$base/uniservice" && curl -fsSLO "$base/SHA256SUMS"
+grep ' uniservice$' SHA256SUMS | sha256sum -c -
 sudo install -m 0755 uniservice /usr/local/bin/uniservice
 ```
 
@@ -75,14 +101,16 @@ sudo install -m 0755 uniservice /usr/local/bin/uniservice
 pipx install uniservice        # or: uv tool install uniservice
 # from a checkout:
 python -m pip install -e ".[dev]"
-python scripts/build_zipapp.py --output dist/uniservice   # build the single file yourself
+python -m pip install -e ".[build]" && python scripts/build_binary.py   # build the binary
+python scripts/build_zipapp.py --output dist/uniservice                 # build the zipapp
 ```
 
 ### Windows notes
 
-The portable layout installs `uniservice.pyz` plus a `uniservice.cmd` shim into
+The default (zipapp) layout installs `uniservice.pyz` plus a `uniservice.cmd` shim into
 `%LOCALAPPDATA%\uniservice\bin` and adds it to your user `PATH` and PowerShell profile.
-`-Pipx` installs through pipx instead, and `-Uninstall` reverses a portable install.
+`-Binary` installs `uniservice.exe` there instead, with no shim and no Python requirement.
+`-Uninstall` reverses either.
 
 Reopen the terminal, then:
 
@@ -205,11 +233,13 @@ uniservice_lib/
     linux.py                systemd units
     macos.py                launchd jobs
     windows.py              Scheduled Tasks
-scripts/build_zipapp.py     builds the single-file release artifact
-install.sh                  the installer (prefix, manifest, --uninstall)
-install-windows.ps1         Windows installer (portable layout, pipx opt-in)
+scripts/build_zipapp.py     builds the portable zipapp (the recommended artifact)
+scripts/build_binary.py     builds the standalone binary (PyInstaller, per platform)
+packaging/entrypoint.py     PyInstaller entry point
+install.sh                  macOS/Linux installer (artifact choice, manifest, --uninstall)
+install-windows.ps1         Windows installer (zipapp by default, -Binary for the .exe)
 tests/                      pytest suite (unit, end-to-end, installer, opt-in integration)
-.github/workflows/          CI (3 platforms) and the release workflow
+.github/workflows/          CI (3 platforms + 5 binary targets) and the release workflow
 ```
 
 Each backend implements the same `Backend` interface, so adding a platform means adding one module and registering it
@@ -225,17 +255,21 @@ ruff format --check .   # formatting
 python -m pytest        # unit + end-to-end tests
 ```
 
-Build the release artifact and try the installer against a throwaway prefix:
+Build both artifacts and try the installer against a throwaway prefix:
 
 ```bash
-python scripts/build_zipapp.py --output dist/uniservice
-./install.sh --prefix /tmp/uniservice-test
+python scripts/build_zipapp.py --output dist/uniservice            # ~30 KB, needs Python
+python -m pip install -e ".[build]"
+python scripts/build_binary.py --output-dir dist                   # ~24 MB, self-contained
+
+./install.sh --prefix /tmp/uniservice-test --from dist/uniservice
 /tmp/uniservice-test/bin/uniservice --version
 ./install.sh --uninstall --prefix /tmp/uniservice-test
 ```
 
-The zipapp build is deterministic, so `pytest tests/test_packaging.py tests/test_install_script.py`
-can compare a locally built artifact against the digest the installer computes.
+The zipapp build is deterministic, so `pytest tests/test_packaging.py tests/test_install_script.py` can compare a
+locally built artifact against the digest the installer computes. The installer tests serve a fake release over
+`file://`, so they exercise the download, the asset selection and the checksum verification without the network.
 
 The default suite mocks the native tools, so it runs on every platform. Opt-in integration tests drive the real
 service manager of the host:
@@ -244,9 +278,10 @@ service manager of the host:
 UNISERVICE_RUN_INTEGRATION=1 python -m pytest -m integration -v
 ```
 
-CI runs lint, shellcheck/PowerShell checks, a reproducible-zipapp build and the full test suite on Ubuntu, macOS and
-Windows. Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes the wheel, the sdist, the zipapp
-and `SHA256SUMS` as a GitHub release.
+CI runs lint, shellcheck/PowerShell checks, the reproducible zipapp build, the full test suite on Ubuntu, macOS and
+Windows, and builds the standalone binary for five targets. Pushing a `v*` tag runs
+`.github/workflows/release.yml`, which publishes the wheel, the sdist, the zipapp, every platform binary and
+`SHA256SUMS` as a GitHub release.
 
 ## Uninstall
 
