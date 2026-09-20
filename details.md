@@ -22,6 +22,18 @@ uniservice decides scope automatically:
 - Normal execution: user scope
 - `sudo uniservice ...`: system scope
 
+## list across platforms
+
+Every backend returns one `ServiceInfo(name, enabled, running)` per service and the CLI renders it as TSV
+(`NAME`, `ENABLED`, `RUNNING`). The shared rules are:
+
+- `enabled`/`running` are tri-state. `?` is emitted whenever the platform did not give a definitive answer, so an
+  unknown value is never silently reported as `no`.
+- Rows are sorted by name (case-insensitive) and duplicate names are collapsed, so the output order is stable and
+  comparable across platforms.
+- Tab, newline, carriage return and NUL in a name are replaced, which keeps the output valid TSV even if a definition
+  was created by hand.
+
 ## Linux (systemd)
 
 Linux uses systemd `.service` units. Autostart, supervision and restarts are handled by systemd.
@@ -53,10 +65,20 @@ Linux uses systemd `.service` units. Autostart, supervision and restarts are han
 
 ### list
 
-- Scan `uniservice-*.service` in the unit directory to list names.
+- Scan `uniservice-*.service` in the unit directory to list names. Masked units are symlinks to `/dev/null`, so
+  symlinks count as unit files too.
 - For each service:
   - ENABLED: `systemctl is-enabled uniservice-NAME.service`
   - RUNNING: `systemctl is-active uniservice-NAME.service`
+- Both answers are read from the first token of the first non-empty output line (stdout first, then stderr), so a
+  warning on stderr cannot corrupt the state.
+- Recognised states:
+  - ENABLED `yes`: `enabled`, `enabled-runtime`
+  - ENABLED `no`: `disabled`, `disabled-runtime`, `masked`, `masked-runtime`, `static`, `indirect`, `generated`,
+    `transient`, `alias`, `linked`, `linked-runtime`, `bad`, `not-found`
+  - RUNNING `yes`: `active`, `activating`, `reloading`
+  - RUNNING `no`: `inactive`, `failed`, `deactivating`
+  - anything else, or a missing `systemctl`: `?`
 
 ### remove
 
@@ -133,10 +155,16 @@ Note: because the plist contains `RunAtLoad=true`, some load/register operations
 
 - Scan `com.uniservice.*.plist` in the plist directory to list names.
 - For each service:
-  - ENABLED: `launchctl print-disabled <domain>` (not listed as disabled => enabled)
+  - ENABLED: `launchctl print-disabled <domain>`. A job that is absent from the override map is *enabled* (launchd
+    only disables jobs that have an explicit override), so `?` is only reported when every domain query failed.
+  - Domains are queried most-specific first (`gui/<uid>`, then `user/<uid>`, or `system`) and the first domain that
+    mentions a label wins.
   - RUNNING:
-    - try `launchctl list` (PID present => running)
-    - if not available, fall back to `pgrep -f` on the command string
+    1. `launchctl list` (a `-` PID means loaded but not running)
+    2. otherwise `launchctl print <domain>/<label>` and look for `pid = <n>`; this is what covers system-scope jobs,
+       which `launchctl list` does not report
+    3. otherwise `pgrep -f` on the command string, with the pattern escaped for POSIX ERE; `pgrep` exit code `1` means
+       "not running" while any other non-zero code means `?`
 
 ### remove
 
@@ -190,10 +218,22 @@ Windows uses Scheduled Tasks managed via `schtasks.exe`.
 
 ### list
 
-- `schtasks.exe /Query /FO CSV /V`, filter tasks with `TaskName` starting with `uniservice-`.
+- Primary query (locale-independent): PowerShell
+  ```powershell
+  Get-ScheduledTask | Where-Object { $_.TaskName -like 'uniservice-*' } |
+    Select-Object TaskName, State, Enabled | ConvertTo-Json -Compress
+  ```
+  `Get-ScheduledTask` returns stable English property names and state words on every Windows locale, which
+  `schtasks.exe` does not.
 - Infer:
-  - ENABLED from `Scheduled Task State` (Enabled/Disabled)
-  - RUNNING from `Status` (Running/Ready/etc.)
+  - ENABLED from `Settings.Enabled`
+  - RUNNING from `State`: `Running` => `yes`; `Ready`/`Disabled` => `no`; `Queued`/`Unknown` => `?`
+- `list` is read-only and therefore does **not** require an elevated shell.
+- Fallback when PowerShell is unavailable: parse `schtasks.exe /Query /FO CSV /V`. That reader strips a UTF-8 BOM and
+  finds the task-name column from the *values* (cells whose leaf component starts with `uniservice-`) instead of the
+  localized header names. Enabled state then comes from the locale-independent Task Scheduler XML
+  (`schtasks.exe /Query /TN NAME /XML`, `Settings/Enabled`), and RUNNING is reported as `?`.
+- If every query fails the command reports an error instead of pretending there are no services.
 
 ### remove
 

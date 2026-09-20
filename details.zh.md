@@ -22,6 +22,14 @@ uniservice 会自动判定作用域：
 - 直接运行：user scope（用户级）
 - `sudo uniservice ...`：system scope（系统级）
 
+## list 的跨平台约定
+
+每个后端都返回 `ServiceInfo(name, enabled, running)`，由 CLI 渲染成 TSV（`NAME`、`ENABLED`、`RUNNING`）。共同规则：
+
+- `enabled` / `running` 是三态：平台没有给出确定答案时输出 `?`，绝不会把“未知”当成 `no`。
+- 结果按名称排序（忽略大小写），同名行会被合并，因此三平台输出顺序稳定、可直接对比。
+- 名称里的制表符、换行、回车和 NUL 会被替换，即使是手工创建的定义也不会破坏 TSV 格式。
+
 ## Linux（systemd）
 
 Linux 上用 systemd 的 `.service` unit 来托管进程（自启/守护/重启均由 systemd 完成）。
@@ -56,6 +64,15 @@ Linux 上用 systemd 的 `.service` unit 来托管进程（自启/守护/重启�
 - 通过扫描对应目录下 `uniservice-*.service` 来列出 NAME，并用 systemd 查询状态：
   - ENABLED：`systemctl is-enabled uniservice-NAME.service`
   - RUNNING：`systemctl is-active uniservice-NAME.service`
+- 被 mask 的单元是指向 `/dev/null` 的软链接，因此软链接同样会被当作单元文件列出。
+- 状态只取“第一行、第一个词”（先看 stdout，再看 stderr），stderr 上的警告不会污染解析结果。
+- 识别规则：
+  - ENABLED `yes`：`enabled`、`enabled-runtime`
+  - ENABLED `no`：`disabled`、`disabled-runtime`、`masked`、`masked-runtime`、`static`、`indirect`、`generated`、
+    `transient`、`alias`、`linked`、`linked-runtime`、`bad`、`not-found`
+  - RUNNING `yes`：`active`、`activating`、`reloading`
+  - RUNNING `no`：`inactive`、`failed`、`deactivating`
+  - 其它情况或缺少 `systemctl`：`?`
 
 ### remove
 
@@ -128,8 +145,15 @@ macOS 上用 launchd 的 plist（LaunchAgents/LaunchDaemons）描述 job，并�
 ### list
 
 - 扫描 `com.uniservice.*.plist` 列出 NAME，并查询状态：
-  - ENABLED：`launchctl print-disabled <domain>`（未标记 disabled 视为 enabled）
-  - RUNNING：优先 `launchctl list`；拿不到时回退 `pgrep -f`（按命令字符串判断）
+  - ENABLED：`launchctl print-disabled <domain>`。未出现在覆盖表里的 job 视为 **enabled**（launchd 只对显式设置
+    过的 job 记录 disabled），只有当所有 domain 查询都失败时才输出 `?`。
+  - domain 按“最具体优先”的顺序查询（`gui/<uid>`，然后 `user/<uid>`；system scope 用 `system`），第一个提到该
+    label 的 domain 生效。
+  - RUNNING：
+    1. 先看 `launchctl list`（PID 为 `-` 表示已载入但没有进程）
+    2. 否则用 `launchctl print <domain>/<label>` 查找 `pid = <n>`；system scope 的 job 不在 `launchctl list` 中，
+       这一步正是为它们准备的
+    3. 再否则用命令字符串做 `pgrep -f`（模式按 POSIX ERE 转义）；`pgrep` 退出码 `1` 表示未运行，其它非零码表示 `?`
 
 ### remove
 
@@ -181,9 +205,20 @@ Windows 上用计划任务实现托管，通过 `schtasks.exe` 管理任务。
 
 ### list
 
-- `schtasks.exe /Query /FO CSV /V`，筛选 `TaskName` 以 `uniservice-` 开头的任务，并从输出字段推断：
-  - ENABLED：`Scheduled Task State`（Enabled/Disabled）
-  - RUNNING：`Status`（Running/Ready 等）
+- 主查询（与系统语言无关）：PowerShell
+  ```powershell
+  Get-ScheduledTask | Where-Object { $_.TaskName -like 'uniservice-*' } |
+    Select-Object TaskName, State, Enabled | ConvertTo-Json -Compress
+  ```
+  `Get-ScheduledTask` 在任何 Windows 语言下都返回固定的英文属性名和状态词，而 `schtasks.exe` 会随系统语言变化。
+- 状态推断：
+  - ENABLED：`Settings.Enabled`
+  - RUNNING：`State`：`Running` => `yes`；`Ready`/`Disabled` => `no`；`Queued`/`Unknown` => `?`
+- `list` 是只读操作，因此 **不需要** 管理员权限。
+- PowerShell 不可用时的回退：解析 `schtasks.exe /Query /FO CSV /V`。该解析器会去掉 UTF-8 BOM，并根据 **值**
+  （叶子名以 `uniservice-` 开头的单元格）来定位任务名列，而不是依赖本地化的表头。ENABLED 则从与语言无关的任务
+  XML（`schtasks.exe /Query /TN NAME /XML` 的 `Settings/Enabled`）读取，RUNNING 记为 `?`。
+- 若所有查询都失败，命令会报错，而不是假装“没有服务”。
 
 ### remove
 

@@ -1,262 +1,30 @@
 #!/usr/bin/env python3
+"""Executable entry point for uniservice.
+
+The command is shipped as a plain script (in addition to the ``console_scripts``
+entry point) so that the install scripts only have to copy the repository next
+to it - no virtual environment or ``pip install`` step is required.
+"""
+
 from __future__ import annotations
 
-import argparse
-import os
-import subprocess
 import sys
 from pathlib import Path
-from linux_backend import LinuxBackend
-from mac_backend import MacBackend
-from utils import Scope, eprint, is_admin_windows, is_root_unix, logger, platform, resolve_command_parts, setup_logging
-from windows_backend import WindowsBackend
 
 
-def require_command(command_parts: list[str]) -> None:
-    if not command_parts:
-        raise SystemExit("Missing COMMAND after --")
+def _ensure_package_on_path() -> None:
+    """Make ``uniservice_lib`` importable when run from a copied directory."""
+    here = Path(__file__).resolve().parent
+    if str(here) not in sys.path:
+        sys.path.insert(0, str(here))
 
 
-def ensure_scope_allowed(scope: Scope) -> None:
-    if platform() == "win":
-        if not is_admin_windows():
-            raise SystemExit("Windows only supports admin execution for uniservice.")
-        return
+def main() -> int:
+    _ensure_package_on_path()
+    from uniservice_lib.cli import main as cli_main
 
-    if scope.value == "system" and not is_root_unix():
-        raise SystemExit("Permission denied. Try running with sudo.")
-
-
-def get_backend(scope: Scope):
-    p = platform()
-    if p == "linux":
-        return LinuxBackend(scope)
-    if p == "mac":
-        return MacBackend(scope)
-    if p == "win":
-        return WindowsBackend(scope)
-    raise SystemExit("Unsupported platform.")
-
-def parse_add_argv(argv: list[str]) -> tuple[str, str, list[str]]:
-    if not argv:
-        raise SystemExit("Missing NAME.")
-    if argv[0] == "--":
-        raise SystemExit("Missing NAME.")
-
-    name = argv[0].strip()
-    if not name:
-        raise SystemExit("Missing NAME.")
-
-    workdir = ""
-    rest = argv[1:]
-    cmd_parts: list[str] = []
-
-    i = 0
-    while i < len(rest):
-        t = rest[i]
-        if t == "--":
-            cmd_parts = rest[i + 1 :]
-            break
-        if t == "--workdir":
-            if i + 1 >= len(rest):
-                raise SystemExit("Missing value for --workdir.")
-            workdir = rest[i + 1]
-            i += 2
-            continue
-        if t.startswith("--"):
-            raise SystemExit(f"Unknown option for add: {t}")
-        cmd_parts = rest[i:]
-        break
-
-    return name, workdir, cmd_parts
-
-
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="uniservice", add_help=True)
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    p_list = sub.add_parser("list")
-
-    p_cat = sub.add_parser("cat")
-    p_cat.add_argument("name", help="service name")
-
-    p_status = sub.add_parser("status")
-    p_status.add_argument("name", help="service name")
-
-    p_logs = sub.add_parser("logs")
-    p_logs.add_argument("name", help="service name")
-    p_logs.add_argument("--lines", type=int, default=200, help="number of log lines to show")
-    p_logs.add_argument("--follow", action="store_true", help="follow logs")
-
-    p_enable = sub.add_parser("enable")
-    p_enable.add_argument("name", help="service name")
-
-    p_disable = sub.add_parser("disable")
-    p_disable.add_argument("name", help="service name")
-
-    p_start = sub.add_parser("start")
-    p_start.add_argument("name", help="service name")
-
-    p_stop = sub.add_parser("stop")
-    p_stop.add_argument("name", help="service name")
-
-    p_remove = sub.add_parser("remove")
-    p_remove.add_argument("name", help="service name")
-
-    p_add = sub.add_parser("add")
-    p_add.add_argument("argv", nargs=argparse.REMAINDER)
-
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str]) -> int:
-    setup_logging()
-    args = parse_args(argv)
-    scope = Scope.from_env()
-    backend = get_backend(scope)
-
-    if args.cmd == "list":
-        ensure_scope_allowed(scope)
-        logger.info("cmd=list")
-        rows = backend.list_info()
-        print("NAME\tENABLED\tRUNNING")
-        for r in rows:
-            if r.enabled is True:
-                enabled = "yes"
-            elif r.enabled is False:
-                enabled = "no"
-            else:
-                enabled = "?"
-
-            if r.running is True:
-                running = "yes"
-            elif r.running is False:
-                running = "no"
-            else:
-                running = "?"
-
-            print(f"{r.name}\t{enabled}\t{running}")
-        return 0
-
-    if args.cmd == "cat":
-        ensure_scope_allowed(scope)
-        logger.info("cmd=cat name=%s", args.name)
-        backend.cat(args.name)
-        return 0
-
-    if args.cmd == "status":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=status name=%s", args.name)
-        backend.status(args.name)
-        return 0
-
-    if args.cmd == "logs":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=logs name=%s", args.name)
-        backend.logs(args.name, lines=args.lines, follow=args.follow)
-        return 0
-
-    if args.cmd == "enable":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=enable name=%s", args.name)
-        backend.enable(args.name)
-        print(f'OK: enabled "{args.name}"')
-        return 0
-
-    if args.cmd == "disable":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=disable name=%s", args.name)
-        backend.disable(args.name)
-        print(f'OK: disabled "{args.name}"')
-        return 0
-
-    if args.cmd == "start":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=start name=%s", args.name)
-        backend.start(args.name)
-        print(f'OK: started "{args.name}"')
-        return 0
-
-    if args.cmd == "stop":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=stop name=%s", args.name)
-        backend.stop(args.name)
-        print(f'OK: stopped "{args.name}"')
-        return 0
-
-    if args.cmd == "remove":
-        ensure_scope_allowed(scope)
-        if not backend.exists(args.name):
-            raise SystemExit(f'Service "{args.name}" not found.')
-        logger.info("cmd=remove name=%s", args.name)
-        backend.stop(args.name)
-        backend.disable(args.name)
-        backend.remove(args.name)
-        print(f'OK: removed "{args.name}"')
-        return 0
-
-    if args.cmd == "add":
-        ensure_scope_allowed(scope)
-        name, workdir, cmd_parts_user = parse_add_argv(args.argv)
-        logger.info("cmd=add name=%s", name)
-        require_command(cmd_parts_user)
-        cmd_parts_resolved = resolve_command_parts(cmd_parts_user)
-        if not workdir:
-            logger.warning("No --workdir provided; command runs in current directory: %s", Path.cwd())
-        wd = Path(workdir) if workdir else Path.cwd()
-        if backend.exists(name):
-            if sys.stdin.isatty():
-                answer = input(f'Service "{name}" already exists. Overwrite? [y/N] ').strip().lower()
-                if answer not in {"y", "yes"}:
-                    raise SystemExit("Aborted.")
-            else:
-                raise SystemExit(f'Service "{name}" already exists. Run in an interactive terminal to confirm overwrite.')
-            backend.stop(name)
-            backend.disable(name)
-            backend.remove(name)
-        backend.create(name, wd, cmd_parts_resolved)
-        backend.enable(name)
-        backend.start(name)
-        print(f'OK: added "{name}"')
-        if platform() != "win" and scope.value == "system":
-            print(f"Hint: Run: sudo uniservice status {name}")
-        else:
-            print(f"Hint: Run: uniservice status {name}")
-        return 0
-
-    raise SystemExit("Unknown command.")
+    return cli_main(sys.argv[1:])
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main(sys.argv[1:]))
-    except BrokenPipeError:
-        raise
-    except subprocess.CalledProcessError as ex:
-        eprint(f"FAIL: command failed ({ex.returncode}): {' '.join(ex.cmd)}")
-        raise SystemExit(ex.returncode)
-    except SystemExit as ex:
-        code = ex.code
-        if code is None:
-            raise
-        if isinstance(code, int):
-            raise
-        msg = str(code).strip()
-        if msg:
-            eprint(f"FAIL: {msg}")
-        raise SystemExit(1)
-    except Exception as ex:
-        eprint(f"FAIL: {type(ex).__name__}: {ex}")
-        raise SystemExit(1)
+    raise SystemExit(main())

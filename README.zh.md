@@ -1,6 +1,6 @@
 # uniservice
 
-[English](README.md)
+[English](README.md) · [![CI](https://github.com/kevinhuang001/uniservice/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinhuang001/uniservice/actions/workflows/ci.yml)
 
 跨平台服务管理工具，把“长期运行/自启/托管”交给操作系统原生机制：
 
@@ -10,12 +10,16 @@
 
 平台实现细节见：[details.zh.md](details.zh.md)（[English](details.md)）
 
+需要 **Python 3.10+**，运行时没有任何第三方依赖。
+
 ## 安装
 
 安装脚本会做两件事：
 
-1. 检查是否存在 Python 3（没有会提示先安装）
-2. 把 `uniservice` 及其依赖模块复制到 PATH 目录，并写入 profile，把该目录加入环境变量
+1. 检查是否存在 Python 3.10+（没有会提示先安装）
+2. 把 `uniservice` 和它的 `uniservice_lib` 包复制到 PATH 目录，并写入 profile，把该目录加入环境变量
+
+在代码仓库里直接运行脚本会安装当前这份代码；通过管道运行则安装最新 `main`。
 
 ### macOS
 
@@ -30,12 +34,6 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 
 - 非 root：安装到 `~/.local/bin/`，并写入 `~/.profile`
 - root：安装到 `/usr/local/bin/`，并写入 `/etc/profile`
-
-安装后重新打开终端验证：
-
-```bash
-uniservice --help
-```
 
 ### Linux
 
@@ -61,6 +59,14 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 
 安装到 `%LOCALAPPDATA%\uniservice\bin\`，并更新 PATH（profile + 用户级 PATH）。重开终端生效。
 
+### 从源码安装
+
+```bash
+git clone https://github.com/kevinhuang001/uniservice.git
+cd uniservice
+python -m pip install -e ".[dev]"   # 可选：同时安装 pytest 和 ruff
+```
+
 ## 使用
 
 ### 作用域（macOS/Linux）
@@ -74,10 +80,13 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
-- 如果可执行文件不是全路径，uniservice 会尝试从 PATH 自动补全，并给 WARNING。
+- 如果可执行文件不是全路径，uniservice 会尝试从 PATH 自动补全，并给出 WARNING。
 - 如果不设置 `--workdir`，默认使用当前目录执行命令。
 - 若同名服务已存在，会提示是否覆盖。
 - `add` 会执行 `enable` + `start`。
+
+服务名不能包含 `/`、`\`、控制字符或 NUL，不能是 `.`/`..`，也不能以 `-` 开头（这些字符会逃出定义目录或破坏原生
+定义格式）。
 
 ### list
 
@@ -85,11 +94,16 @@ uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 uniservice list
 ```
 
-输出为 TSV（三列，以制表符分隔）：
+输出为 TSV（制表符分隔），按名称排序：
 
-- NAME：服务名
-- ENABLED：是否启用自启（yes/no/?）
-- RUNNING：是否正在运行（yes/no/?）
+| 列 | 含义 |
+| --- | --- |
+| `NAME` | 服务名 |
+| `ENABLED` | 是否启用自启：`yes` / `no` / `?` |
+| `RUNNING` | 是否正在运行：`yes` / `no` / `?` |
+
+`?` 表示平台没有给出确定答案（例如缺少 `systemctl`、launchd 查询失败，或单元处于过渡状态），绝不会靠猜。
+名称中的控制字符会被替换、重复行会被合并，因此输出始终是合法的 TSV。
 
 ### 控制
 
@@ -98,6 +112,14 @@ uniservice enable  demo
 uniservice start   demo
 uniservice stop    demo
 uniservice disable demo
+```
+
+### 状态与日志
+
+```bash
+uniservice status demo
+uniservice logs   demo --lines 200
+uniservice logs   demo --follow      # 或 -f
 ```
 
 ### remove
@@ -114,6 +136,8 @@ uniservice remove demo
 uniservice cat demo
 ```
 
+打印一条等价的 `uniservice add ...` 命令。
+
 ## 日志
 
 - 控制台：WARNING 及以上
@@ -122,23 +146,67 @@ uniservice cat demo
   - macOS/Linux：`~/.uniservice/logs/uniservice.log`
   - Windows：`%LOCALAPPDATA%\uniservice\logs\uniservice.log`
 
+## 代码结构
+
+```
+uniservice                  可执行入口（很薄的启动器）
+uniservice_lib/
+  cli.py                    参数解析与命令分发
+  scope.py                  user / system 作用域
+  naming.py                 服务名校验与原生定义名
+  process.py                子进程封装
+  platform_utils.py         平台与权限探测
+  logging_utils.py          控制台 + 文件日志
+  errors.py                 异常体系
+  backends/
+    __init__.py             后端选择
+    base.py                 Backend 接口、ServiceInfo、状态解析
+    linux.py                systemd 单元
+    macos.py                launchd 任务
+    windows.py              计划任务
+tests/                      pytest 测试（单元、端到端、可选集成）
+```
+
+所有后端实现同一个 `Backend` 接口：新增平台只需要新增一个模块，并在
+`uniservice_lib/backends/__init__.py` 中注册。
+
+## 开发
+
+```bash
+python -m pip install -e ".[dev]"
+
+ruff check .            # 静态检查
+ruff format --check .   # 格式检查
+python -m pytest        # 单元 + 端到端测试
+```
+
+默认测试会 mock 系统命令，因此在三个平台上都能运行。可选的集成测试会真正调用宿主机的服务管理器：
+
+```bash
+UNISERVICE_RUN_INTEGRATION=1 python -m pytest -m integration -v
+```
+
+CI 会在 Ubuntu、macOS、Windows 上运行静态检查、shellcheck/PowerShell 检查以及完整测试。
+
 ## 卸载
 
 卸载包含两部分：
 
-1) 从 PATH 移除 uniservice 命令文件  
+1) 从 PATH 移除 uniservice 命令文件
 2) 删除 uniservice 创建的服务（建议）
 
 macOS/Linux（非 root 安装）：
 
 ```bash
-rm -f ~/.local/bin/uniservice ~/.local/bin/utils.py ~/.local/bin/backend_base.py ~/.local/bin/linux_backend.py ~/.local/bin/mac_backend.py ~/.local/bin/windows_backend.py
+rm -rf ~/.local/bin/uniservice ~/.local/bin/uniservice_lib
+rm -f  ~/.local/bin/utils.py ~/.local/bin/backend_base.py ~/.local/bin/linux_backend.py ~/.local/bin/mac_backend.py ~/.local/bin/windows_backend.py
 ```
 
 macOS/Linux（root 安装）：
 
 ```bash
-sudo rm -f /usr/local/bin/uniservice /usr/local/bin/utils.py /usr/local/bin/backend_base.py /usr/local/bin/linux_backend.py /usr/local/bin/mac_backend.py /usr/local/bin/windows_backend.py
+sudo rm -rf /usr/local/bin/uniservice /usr/local/bin/uniservice_lib
+sudo rm -f  /usr/local/bin/utils.py /usr/local/bin/backend_base.py /usr/local/bin/linux_backend.py /usr/local/bin/mac_backend.py /usr/local/bin/windows_backend.py
 ```
 
 Windows：
