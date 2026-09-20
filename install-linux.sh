@@ -136,3 +136,11 @@ fi
 
 echo "OK: Installed to ${dst}"
 echo "Hint: Reopen your terminal, then run: uniservice --help"
+
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo
+  echo "Note: system-level services use the system scope, which requires root. 'sudo'"
+  echo "      resets PATH, so call the user install by its absolute path:"
+  echo "        sudo ${dst} add ..."
+  echo "      Or re-run this installer with sudo for a system-wide install."
+fi

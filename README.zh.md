@@ -35,6 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 - 非 root：安装到 `~/.local/bin/`，并写入 `~/.profile`
 - root：安装到 `/usr/local/bin/`，并写入 `/etc/profile`
 
+两种安装都能管理系统级服务；用户安装通过 `sudo "$(command -v uniservice)" ...`
+进入 root 作用域，原因见 [作用域](#作用域macoslinux)。
+
 ### Linux
 
 ```bash
@@ -71,8 +74,36 @@ python -m pip install -e ".[dev]"   # 可选：同时安装 pytest 和 ruff
 
 ### 作用域（macOS/Linux）
 
-- 直接运行 `uniservice`：管理当前用户服务
-- 通过 `sudo uniservice ...` 运行：管理系统服务
+作用域由你的权限决定，没有开关：
+
+| 运行方式 | 作用域 | 定义文件位置 |
+| --- | --- | --- |
+| `uniservice ...` | user（当前用户） | `~/.config/systemd/user/`、`~/Library/LaunchAgents/` |
+| `sudo uniservice ...` | system（整机） | `/etc/systemd/system/`、`/Library/LaunchDaemons/` |
+
+**用户安装同样可以管理系统级服务。** 但 `sudo` 会把 `PATH` 重置成安全的默认值
+（`secure_path`），其中不含 `~/.local/bin`，所以裸写 `sudo uniservice` 会报
+`command not found`。用绝对路径调用即可：
+
+```bash
+sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.server 8000
+```
+
+在 `sudo` 下有两处行为差异：
+
+- `--` 后面的命令是用 **root 的 `PATH`** 解析的，`python3` 可能解析到
+  `/usr/bin/python3` 而不是你的 conda/venv；在意的话请传绝对路径；
+- 定义文件和日志属于 root（`/root/.uniservice/logs/`）。
+
+如果你就是想直接写 `sudo uniservice`，用 `sudo bash` 装一份系统级，或者把用户安装链接到
+`/usr/local/bin`：
+
+```bash
+sudo ln -sf "$(command -v uniservice)" /usr/local/bin/uniservice
+```
+
+Windows 没有 `sudo`：`uniservice list` 在普通终端即可运行，其它命令需要 **管理员**
+PowerShell/CMD。
 
 ### add
 

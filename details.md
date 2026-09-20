@@ -17,10 +17,24 @@ This document explains how `uniservice` maps commands to native OS mechanisms:
 
 ## Scope (macOS/Linux)
 
-uniservice decides scope automatically:
+uniservice derives the scope from the effective user; there is no flag:
 
-- Normal execution: user scope
-- `sudo uniservice ...`: system scope
+- Normal execution: user scope (`~/.config/systemd/user`, `~/Library/LaunchAgents`)
+- `sudo uniservice ...`: system scope (`/etc/systemd/system`, `/Library/LaunchDaemons`)
+
+`sudo` resets `PATH` to the sudoers `secure_path`, which does not contain a user
+install directory, so a bare `sudo uniservice` only works after a **system-wide**
+install (`sudo bash install-*.sh`). With a user install, call it by absolute path:
+
+```bash
+sudo "$(command -v uniservice)" list
+```
+
+Two things then change: the command after `--` is resolved with **root's** `PATH`,
+and the definition plus its logs belong to root (`/root/.uniservice/logs`).
+
+On Windows the scope is always `system`; `list` works unelevated, every other
+command needs an Administrator shell.
 
 ## list across platforms
 

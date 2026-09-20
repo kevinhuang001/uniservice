@@ -72,3 +72,11 @@ Other:
   opt-in integration tests that drive the real service manager. Library coverage is ~90%.
 - `.github/workflows/ci.yml`: ruff, shellcheck, a PowerShell parse check, and the full test suite on Ubuntu, macOS
   and Windows with Python 3.10 and 3.13.
+
+### Documentation
+
+- Explained how scope is derived and how a **user** install reaches the system scope: `sudo` resets `PATH` to the
+  sudoers `secure_path`, which excludes `~/.local/bin`, so a bare `sudo uniservice` only works after a system-wide
+  install. With a user install, call `sudo "$(command -v uniservice)" ...`, or link it into `/usr/local/bin`. The
+  install scripts and `uniservice --help` now print the same hint.
+

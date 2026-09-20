@@ -35,6 +35,10 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 - non-root: installs to `~/.local/bin/` and writes `~/.profile`
 - root: installs to `/usr/local/bin/` and writes `/etc/profile`
 
+Both installs can manage system services. A user install reaches root's scope with
+`sudo "$(command -v uniservice)" ...` — see [Scope](#scope-macoslinux) for why the
+absolute path is required.
+
 ### Linux
 
 ```bash
@@ -77,8 +81,37 @@ python -m pip install -e ".[dev]"   # optional: also installs pytest and ruff
 
 ### Scope (macOS/Linux)
 
-- Run `uniservice` normally: manages current-user services.
-- Run via `sudo uniservice ...`: manages system services.
+The scope is derived from your privileges, not from a flag:
+
+| How you run it | Scope | Definitions live in |
+| --- | --- | --- |
+| `uniservice ...` | user | `~/.config/systemd/user/`, `~/Library/LaunchAgents/` |
+| `sudo uniservice ...` | system | `/etc/systemd/system/`, `/Library/LaunchDaemons/` |
+
+**A user install can manage system services.** `sudo` resets `PATH` to a safe
+default (`secure_path`) that does not contain `~/.local/bin`, so a bare
+`sudo uniservice` fails with `command not found`. Call it by absolute path:
+
+```bash
+sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.server 8000
+```
+
+Two things change under `sudo`:
+
+- the command after `--` is resolved with **root's** `PATH`, so `python3` may
+  resolve to `/usr/bin/python3` instead of your conda/venv copy — pass an
+  absolute path when that matters;
+- the definition and its logs belong to root (`/root/.uniservice/logs/`).
+
+If you would rather type `sudo uniservice`, install system-wide once with
+`sudo bash`, or link the user install into `/usr/local/bin`:
+
+```bash
+sudo ln -sf "$(command -v uniservice)" /usr/local/bin/uniservice
+```
+
+On Windows there is no `sudo`: `uniservice list` works in any shell, every other
+command needs an **Administrator** PowerShell/CMD.
 
 ### Add
 

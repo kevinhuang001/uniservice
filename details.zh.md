@@ -17,10 +17,23 @@
 
 ## 作用域（macOS/Linux）
 
-uniservice 会自动判定作用域：
+uniservice 根据生效用户自动判定作用域，没有开关：
 
-- 直接运行：user scope（用户级）
-- `sudo uniservice ...`：system scope（系统级）
+- 直接运行：user scope（用户级，`~/.config/systemd/user`、`~/Library/LaunchAgents`）
+- `sudo uniservice ...`：system scope（系统级，`/etc/systemd/system`、`/Library/LaunchDaemons`）
+
+`sudo` 会把 `PATH` 重置为 sudoers 的 `secure_path`，其中不含用户安装目录，所以裸写
+`sudo uniservice` 只有在 **系统级安装**（`sudo bash install-*.sh`）之后才可用。用户安装请用
+绝对路径调用：
+
+```bash
+sudo "$(command -v uniservice)" list
+```
+
+此时有两处变化：`--` 后面的命令用 **root 的 `PATH`** 解析；定义文件与日志归属 root
+（`/root/.uniservice/logs`）。
+
+Windows 上作用域恒为 `system`：`list` 不需要提权，其它命令需要管理员终端。
 
 ## list 的跨平台约定
 

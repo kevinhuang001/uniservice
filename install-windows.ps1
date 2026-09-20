@@ -161,6 +161,10 @@ if (`$env:Path -notlike "*`$uniserviceBin*") { `$env:Path = `$env:Path + ';' + `
 
   Write-Host "OK: Installed to $installDir"
   Write-Host "Hint: Reopen PowerShell/CMD, then run: uniservice --help"
+  Write-Host ""
+  Write-Host "Note: uniservice creates Scheduled Tasks that run as SYSTEM, so 'add',"
+  Write-Host "      'start', 'stop' and 'remove' need an Administrator PowerShell/CMD."
+  Write-Host "      'uniservice list' works without elevation."
 } finally {
   if ($tmpRoot -and (Test-Path -LiteralPath $tmpRoot)) {
     Remove-Item -Recurse -Force -LiteralPath $tmpRoot

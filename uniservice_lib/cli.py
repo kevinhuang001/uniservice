@@ -66,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="uniservice",
         description="Cross-platform service manager (systemd / launchd / Scheduled Tasks).",
+        epilog=(
+            "scope: running this command yourself manages per-user services; running it through sudo "
+            "(macOS/Linux) or an Administrator shell (Windows) manages system-wide services. sudo resets "
+            'PATH, so call a user install by absolute path: sudo "$(command -v uniservice)" list'
+        ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
