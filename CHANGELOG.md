@@ -3,19 +3,43 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.4.0] - 2026-09-20
 
 ### Added
 
 - `uniservice uninstall` (and `--dry-run`): the command removes itself using the manifest its
-  installer wrote, instead of making you remember `install.sh --uninstall`. On POSIX the running
-  file is unlinked directly; on Windows, where a running image cannot be deleted, the last file is
-  handed to a short-lived `cmd.exe` that also prunes the directories that only become empty
-  afterwards. `install.sh --uninstall` stays as the fallback for when the command is broken or
-  already gone.
+  installer wrote, instead of making you remember `install.sh --uninstall`. Services are
+  deliberately left alone. On POSIX the running file is unlinked directly; on Windows, where a
+  running image cannot be deleted, the remaining files are handed to a short-lived `cmd.exe` that
+  also prunes the directories that only become empty afterwards, and the same file is registered
+  with `MoveFileEx(..., MOVEFILE_DELAY_UNTIL_REBOOT)` so it cannot survive a reboot even if that
+  helper is blocked. `install.sh --uninstall` stays as the fallback for when the command is broken
+  or already gone.
 - `uniservice_lib/installation.py` locates an installation from the running command
   (`sys.executable` when frozen, `sys.argv[0]` for the zipapp) and refuses to delete anything
   outside the recorded prefix, so a tampered manifest cannot point the removal elsewhere.
+- `UNISERVICE_BINARY=1` selects the standalone binary for both installers. `iwr ... | iex` evaluates
+  the script without writing it to disk, so the Windows one-liner had no way to reach `-Binary`;
+  the environment variable gives it one.
+
+### Fixed
+
+- Windows: `install-windows.ps1` wrote the manifest to `<prefix>\manifest` while `install.sh` and
+  `uniservice uninstall` both expect `<prefix>/lib/uniservice/manifest`, so the command reported
+  "no uniservice installation is recorded" and left everything behind. It now uses the same layout
+  (and creates the directory, which `Set-Content` does not do).
+- `remove_installation` compared the recorded path against itself instead of the image the process
+  is actually running from, so on Windows every file looked like "deleting myself" and was
+  deferred. It now compares against `sys.executable` / `sys.argv[0]`.
+- Windows: `uniservice.cmd` was deleted from under the `cmd.exe` executing it, which printed
+  "The batch file cannot be found."; `.cmd`/`.bat` are deferred with the running image.
+
+### Documentation
+
+- Removed the `pipx install uniservice` / `uv tool install uniservice` instructions: the project has
+  never been published to PyPI, and the name is currently unclaimed, so that line was one
+  registration away from pointing users at somebody else's package. The documented installation
+  routes are now exactly the artifacts a release contains.
 
 ## [1.3.0] - 2026-09-20
 
