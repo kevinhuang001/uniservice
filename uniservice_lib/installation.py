@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import UniserviceError
+from .logging_utils import logger
 
 __all__ = [
     "MANIFEST_NAME",
@@ -117,17 +118,23 @@ def find_installation(command: Path | None = None) -> Installation | None:
     return None
 
 
-def remove_installation(installation: Installation, *, dry_run: bool = False) -> tuple[list[Path], list[Path]]:
+def remove_installation(
+    installation: Installation, *, dry_run: bool = False, defer: bool = True
+) -> tuple[list[Path], list[Path]]:
     """Remove everything the manifest records.
 
     Returns ``(removed, deferred)``.  *deferred* is non-empty only on Windows,
     where the running executable cannot be deleted by the process that is running
-    it: those files are deleted by a detached ``cmd.exe`` once this process exits.
+    it: those files are handed to a detached ``cmd.exe`` once this process exits,
+    and registered for deletion at the next boot as a backstop.  Pass
+    ``defer=False`` to report them instead of scheduling anything.
     """
     prefix = installation.prefix.resolve()
     removed: list[Path] = []
     deferred: list[Path] = []
-    running = installation.command.resolve()
+    # Only the image this process is actually running from has to be deferred;
+    # comparing against the *recorded* path would defer any file at all.
+    running = {_normcase(path) for path in running_commands()}
 
     for target in installation.recorded_files:
         resolved = _inside_prefix(target, prefix)
@@ -138,7 +145,7 @@ def remove_installation(installation: Installation, *, dry_run: bool = False) ->
         if dry_run:
             removed.append(resolved)
             continue
-        if os.name == "nt" and resolved == running:
+        if os.name == "nt" and _normcase(resolved) in running:
             deferred.append(resolved)
             continue
         _unlink(resolved)
@@ -148,7 +155,8 @@ def remove_installation(installation: Installation, *, dry_run: bool = False) ->
         installation.manifest.unlink(missing_ok=True)
         _prune_empty_directories(prefix)
         for path in deferred:
-            _schedule_windows_delete(path, prefix)
+            if defer:
+                _schedule_windows_delete(path, prefix)
 
     return removed, deferred
 
@@ -163,9 +171,16 @@ def _inside_prefix(target: Path, prefix: Path) -> Path | None:
         resolved = target.resolve()
     except OSError:  # pragma: no cover - defensive
         return None
-    if resolved != prefix and prefix not in resolved.parents:
+    if _normcase(resolved) != _normcase(prefix) and _normcase(prefix) not in {
+        _normcase(parent) for parent in resolved.parents
+    }:
         return None
     return resolved
+
+
+def _normcase(path: Path) -> str:
+    """Comparable form of *path*; Windows paths are case-insensitive."""
+    return os.path.normcase(str(path))
 
 
 def _unlink(path: Path) -> None:
@@ -190,14 +205,23 @@ def _prune_empty_directories(root: Path) -> None:
 
 
 def _schedule_windows_delete(path: Path, prefix: Path) -> None:
-    """Ask a detached ``cmd.exe`` to finish removing *path* once this process exits.
+    """Finish removing *path* after this process exits.
 
-    Windows refuses to delete a running image, and there is no portable "delete
-    yourself" call, so the deletion - and the pruning of the directories that
-    only become empty afterwards - is handed to a short-lived helper.
+    Windows maps a running image without ``FILE_SHARE_DELETE``, so ``DeleteFile``
+    on our own executable cannot succeed while we are running, and there is no
+    portable "delete yourself" call.  Two mechanisms are used together:
+
+    1. a detached ``cmd.exe`` that waits for this process to exit, deletes the
+       file and prunes the directories that only become empty afterwards - this
+       is what removes it "now";
+    2. ``MoveFileEx(..., MOVEFILE_DELAY_UNTIL_REBOOT)``, which Windows guarantees
+       even if the helper is blocked, so the file cannot survive a reboot.
     """
     if os.name != "nt":  # pragma: no cover - guarded by the caller
         return
+
+    _register_reboot_delete(path)
+
     # Deepest first; rmdir fails harmlessly on a directory that still has files.
     prune = " & ".join(
         f'rmdir "{directory}" 2>nul'
@@ -206,8 +230,34 @@ def _schedule_windows_delete(path: Path, prefix: Path) -> None:
     try:
         subprocess.Popen(  # a fixed cmd.exe invocation, no shell involved
             f'cmd.exe /c ping -n 3 127.0.0.1 >nul & del /f /q "{path}" & {prune}',
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # CREATE_NO_WINDOW rather than DETACHED_PROCESS: cmd.exe with no
+            # console at all can fail its own redirections.
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
-    except OSError as exc:  # pragma: no cover - depends on the host
-        raise UniserviceError(f"could not schedule the removal of {path}: {exc}") from None
+    except OSError as exc:
+        # The reboot registration above still gets rid of it; say so rather than
+        # pretending the command is gone.
+        raise UniserviceError(f"{path} will be removed the next time Windows restarts ({exc})") from None
+
+
+def _register_reboot_delete(path: Path) -> None:
+    """Ask Windows to delete *path* during the next boot, best effort."""
+    if os.name != "nt":  # pragma: no cover - guarded by the caller
+        return
+    try:
+        import ctypes
+
+        movefile_delay_until_reboot = 0x4
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
+        kernel32.MoveFileExW.restype = ctypes.c_int
+        if not kernel32.MoveFileExW(str(path), None, movefile_delay_until_reboot):
+            # Needs elevation for the machine-wide pending-rename list; a per-user
+            # install can still be handled by the helper process.
+            logger.debug("MoveFileEx DELAY_UNTIL_REBOOT failed for %s (error %s)", path, ctypes.get_last_error())
+    except Exception as exc:  # pragma: no cover - depends on the host
+        logger.debug("could not register a reboot delete for %s: %s", path, exc)

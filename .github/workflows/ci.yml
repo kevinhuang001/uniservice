@@ -102,17 +102,51 @@ jobs:
             $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-binary'
             $artifact = (Get-ChildItem dist\uniservice-*.exe).FullName
             ./install-windows.ps1 -From $artifact -Prefix $prefix -NoModifyPath
-            & (Join-Path $prefix 'bin\uniservice.exe') --version
+            $exe = Join-Path $prefix 'bin\uniservice.exe'
+            & $exe --version
+            if ($LASTEXITCODE -ne 0) { throw "$exe --version exited $LASTEXITCODE" }
 
-            # Windows cannot delete a running image, so `uninstall` hands the job
-            # to a detached cmd.exe and the directories are pruned just after.
-            & (Join-Path $prefix 'bin\uniservice.exe') uninstall
-            for ($i = 0; $i -lt 20 -and (Test-Path -LiteralPath $prefix); $i++) { Start-Sleep -Milliseconds 500 }
-            if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
+            # A running image cannot delete itself on Windows: the manifest and
+            # the empty directories go immediately, and the .exe is handed to a
+            # helper that runs once this process is gone.
+            $output = & $exe uninstall 2>&1 | Out-String
+            Write-Host $output
+            if ($LASTEXITCODE -ne 0) { throw "uninstall exited $LASTEXITCODE`n$output" }
+            if ($output -notmatch 'a moment after this command exits') {
+              throw "expected the deferred message, got:`n$output"
+            }
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Test-Path -LiteralPath $prefix) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+            if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind`n$output" }
             Write-Host 'standalone binary install/self-uninstall OK'
           } catch {
             $message = ($_ | Out-String).Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
             [Console]::WriteLine("::error title=windows binary install::$message")
+            [Console]::Out.Flush()
+            throw
+          }
+      - name: Self-uninstall the portable zipapp on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # A .pyz is not a mapped image, so the recommended install removes
+          # itself with no helper at all.
+          try {
+            $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-zipapp'
+            python scripts/build_zipapp.py --output build/uniservice --quiet
+            ./install-windows.ps1 -From "$PWD/build/uniservice" -Prefix $prefix -NoModifyPath
+            $shim = Join-Path $prefix 'bin\uniservice.cmd'
+            & $shim --version
+            $output = & $shim uninstall 2>&1 | Out-String
+            Write-Host $output
+            if ($output -match 'a moment after this command exits') {
+              throw "the zipapp should not need a deferred delete:`n$output"
+            }
+            if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind`n$output" }
+            Write-Host 'portable zipapp self-uninstall OK'
+          } catch {
+            $message = ($_ | Out-String).Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            [Console]::WriteLine("::error title=windows zipapp uninstall::$message")
             [Console]::Out.Flush()
             throw
           }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -123,6 +124,25 @@ def test_paths_outside_the_prefix_are_ignored(tmp_path: Path) -> None:
     remove_installation(Installation(installation.prefix, installation.command, installation.manifest, tampered))
 
     assert outsider.read_text(encoding="utf-8") == "do not delete\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="only Windows refuses to delete a running image")
+def test_running_executable_is_deferred_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    installation = make_installation(tmp_path)
+    scheduled: list[Path] = []
+    monkeypatch.setattr("uniservice_lib.installation.running_commands", lambda: [installation.command])
+    monkeypatch.setattr(
+        "uniservice_lib.installation._schedule_windows_delete",
+        lambda path, prefix: scheduled.append(path),
+    )
+
+    removed, deferred = remove_installation(installation)
+
+    assert removed == []
+    assert deferred == [installation.command]
+    assert scheduled == [installation.command]
+    assert installation.command.exists()  # still there until the helper runs
+    assert not installation.manifest.exists()
 
 
 def test_remove_installation_reports_a_permission_problem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

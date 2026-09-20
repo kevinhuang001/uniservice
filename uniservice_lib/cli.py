@@ -255,7 +255,9 @@ def _cmd_uninstall(*, dry_run: bool) -> int:
     for path in removed:
         print(f"  {path}")
     for path in deferred:
-        print(f"  {path} (once this process exits)")
+        # Windows only: a running image cannot delete itself, so it is handed to
+        # a helper that runs once this process is gone.
+        print(f"  {path} (a moment after this command exits)")
     if not removed and not deferred and not dry_run:
         print("  (there was nothing left to remove)")
 
