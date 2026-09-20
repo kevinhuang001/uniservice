@@ -91,7 +91,9 @@ jobs:
           prefix="$(mktemp -d)/uniservice"
           ./install.sh --prefix "$prefix" --from dist/uniservice-*
           "$prefix/bin/uniservice" --version
-          ./install.sh --uninstall --prefix "$prefix"
+          # The command removes itself; on Linux unlinking a running image is fine.
+          "$prefix/bin/uniservice" uninstall
+          test ! -e "$prefix"
       - name: Install it with install-windows.ps1
         if: runner.os == 'Windows'
         shell: pwsh
@@ -101,9 +103,13 @@ jobs:
             $artifact = (Get-ChildItem dist\uniservice-*.exe).FullName
             ./install-windows.ps1 -From $artifact -Prefix $prefix -NoModifyPath
             & (Join-Path $prefix 'bin\uniservice.exe') --version
-            ./install-windows.ps1 -Uninstall -Prefix $prefix
+
+            # Windows cannot delete a running image, so `uninstall` hands the job
+            # to a detached cmd.exe and the directories are pruned just after.
+            & (Join-Path $prefix 'bin\uniservice.exe') uninstall
+            for ($i = 0; $i -lt 20 -and (Test-Path -LiteralPath $prefix); $i++) { Start-Sleep -Milliseconds 500 }
             if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
-            Write-Host 'standalone binary install/uninstall OK'
+            Write-Host 'standalone binary install/self-uninstall OK'
           } catch {
             $message = ($_ | Out-String).Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
             [Console]::WriteLine("::error title=windows binary install::$message")
@@ -149,13 +155,14 @@ jobs:
         run: |
           set -euo pipefail
           sudo ./install.sh --from "$PWD/build/uniservice"
-          trap 'sudo ./install.sh --uninstall || true' EXIT
+          trap 'sudo ./install.sh --uninstall 2>/dev/null || sudo uniservice uninstall || true' EXIT
           command -v uniservice
           uniservice --version
           uniservice list
           test -f /usr/local/lib/uniservice/manifest
           grep -q '^kind=zipapp$' /usr/local/lib/uniservice/manifest
-          sudo ./install.sh --uninstall
+          # The normal way to undo this is now the command's own subcommand.
+          sudo uniservice uninstall
           test ! -e /usr/local/bin/uniservice
           trap - EXIT
       - name: Custom prefix round trip

@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `uniservice uninstall` (and `--dry-run`): the command removes itself using the manifest its
+  installer wrote, instead of making you remember `install.sh --uninstall`. On POSIX the running
+  file is unlinked directly; on Windows, where a running image cannot be deleted, the last file is
+  handed to a short-lived `cmd.exe` that also prunes the directories that only become empty
+  afterwards. `install.sh --uninstall` stays as the fallback for when the command is broken or
+  already gone.
+- `uniservice_lib/installation.py` locates an installation from the running command
+  (`sys.executable` when frozen, `sys.argv[0]` for the zipapp) and refuses to delete anything
+  outside the recorded prefix, so a tampered manifest cannot point the removal elsewhere.
+
 ## [1.3.0] - 2026-09-20
 
 ### Added

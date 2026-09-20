@@ -276,19 +276,28 @@ sdist、zipapp、各平台二进制和 `SHA256SUMS`。
 
 ## 卸载
 
+`uniservice` 可以自己删掉自己：
+
 ```bash
-sudo ./install.sh --uninstall          # macOS/Linux，按记录的 manifest 卸载
-./install.sh --uninstall --prefix DIR  # 装在自定义前缀时
+sudo uniservice uninstall        # 装在自定义前缀时直接：uniservice uninstall
+uniservice uninstall --dry-run   # 先看看会删什么
 ```
 
-```powershell
-./install-windows.ps1 -Uninstall      # Windows 便携布局
-```
+它读取安装器写下的 manifest（`/usr/local/lib/uniservice/manifest`），只删除记录过的文件，并把因此
+变空的目录清理掉。安装器从未写过任何 `PATH` 行，所以没有别的东西要清。Windows 上正在运行的 `.exe`
+无法删除自己，命令会把最后这个文件交给一个短命 helper，命令返回后稍等片刻它就消失了。
 
-安装器只删除记录在 `/usr/local/lib/uniservice/manifest` 里的内容，并把因此变空的目录清理掉；它从未
-写过任何 `PATH` 行，所以没有需要清理的东西。别忘了先删掉自己创建的服务：
+**你自己创建的服务不受影响** —— 只删命令本身。不想要的服务请在命令还在的时候先删掉：
 
 ```bash
 uniservice list
 uniservice remove <name>
+```
+
+如果命令已经损坏或已被删掉，安装器仍然可以收拾残局：
+
+```bash
+sudo ./install.sh --uninstall          # macOS/Linux，同一份 manifest
+./install.sh --uninstall --prefix DIR  # 装在自定义前缀时
+./install-windows.ps1 -Uninstall       # Windows
 ```

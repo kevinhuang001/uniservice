@@ -80,6 +80,8 @@ Options:
                         By default the digest published in $CHECKSUM_FILE is used.
   --from FILE           Install a local zipapp or binary instead of downloading.
   --uninstall           Remove a previous installation recorded in the manifest.
+                        'uniservice uninstall' does the same thing from the
+                        installed command, and is the normal way to do it.
   -h, --help            Show this help.
 
 Environment:

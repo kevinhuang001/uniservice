@@ -14,6 +14,7 @@ from . import __version__
 from .backends import get_backend
 from .backends.base import ServiceInfo
 from .errors import ServiceNotFoundError, UniserviceError
+from .installation import find_installation, manifest_path_for, remove_installation, running_commands
 from .logging_utils import eprint, logger, setup_logging
 from .naming import validate_service_name
 from .platform_utils import WINDOWS, is_admin_windows, is_root_unix, platform
@@ -100,6 +101,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     add = subparsers.add_parser("add", help="create, enable and start a service")
     add.add_argument("argv", nargs=argparse.REMAINDER, help="NAME [--workdir DIR] -- COMMAND [ARG ...]")
+
+    uninstall = subparsers.add_parser(
+        "uninstall",
+        help="remove the uniservice command itself",
+        description=(
+            "Removes the uniservice command and the files its installer recorded. "
+            "Services you created are left alone; delete them with 'uniservice remove NAME' first "
+            "if you do not want them."
+        ),
+    )
+    uninstall.add_argument("--dry-run", action="store_true", help="show what would be removed")
 
     return parser
 
@@ -212,6 +224,8 @@ def entrypoint() -> None:
 
 def _dispatch(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "uninstall":
+        return _cmd_uninstall(dry_run=args.dry_run)
     if args.command == "list":
         return _cmd_list()
     if args.command == "add":
@@ -219,6 +233,35 @@ def _dispatch(argv: list[str]) -> int:
     if args.command == "logs":
         return _cmd_logs(args)
     return _cmd_service(args)
+
+
+def _cmd_uninstall(*, dry_run: bool) -> int:
+    """Remove the uniservice command itself; never touches services."""
+    installation = find_installation()
+    if installation is None:
+        locations = ", ".join(str(path) for path in (manifest_path_for(c) for c in running_commands()))
+        raise UniserviceError(
+            f"no uniservice installation is recorded at {locations or 'this location'}. "
+            "If it was installed with pip or pipx, uninstall it with that tool instead."
+        )
+
+    logger.info("cmd=uninstall prefix=%s kind=%s", installation.prefix, installation.kind)
+    removed, deferred = remove_installation(installation, dry_run=dry_run)
+
+    print(
+        f"{'Would remove' if dry_run else 'Removed'} "
+        f"uniservice {installation.version} ({installation.kind}) from {installation.prefix}"
+    )
+    for path in removed:
+        print(f"  {path}")
+    for path in deferred:
+        print(f"  {path} (once this process exits)")
+    if not removed and not deferred and not dry_run:
+        print("  (there was nothing left to remove)")
+
+    if not dry_run:
+        print("Note: services you created are untouched. Remove them with 'uniservice remove NAME'.")
+    return EXIT_SUCCESS
 
 
 def _cmd_list() -> int:

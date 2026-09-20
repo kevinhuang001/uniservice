@@ -288,20 +288,30 @@ Windows, and builds the standalone binary for five targets. Pushing a `v*` tag r
 
 ## Uninstall
 
+`uniservice` removes itself:
+
 ```bash
-sudo ./install.sh --uninstall              # macOS/Linux, uses the recorded manifest
-./install.sh --uninstall --prefix DIR      # if you installed to a custom prefix
+sudo uniservice uninstall        # or: uniservice uninstall, for a --prefix install
+uniservice uninstall --dry-run   # show what would be removed first
 ```
 
-```powershell
-./install-windows.ps1 -Uninstall      # Windows portable layout
-```
+It reads the manifest its installer wrote (`/usr/local/lib/uniservice/manifest`), deletes exactly
+those files and prunes the directories that become empty. It never added a `PATH` line, so there is
+nothing else to clean up. On Windows the running `.exe` cannot delete itself, so the command hands
+that last file to a short-lived helper and it disappears a moment after the command returns.
 
-The installer removes exactly what it recorded in `/usr/local/lib/uniservice/install.json` and
-prunes the directories that become empty. It never added a `PATH` line to remove. Remember to
-remove the services you created first:
+**Your services are untouched** - only the command is removed. Delete the services you no longer
+want first, while the command still exists:
 
 ```bash
 uniservice list
 uniservice remove <name>
+```
+
+If the command is already broken or gone, the installer can still clean up after it:
+
+```bash
+sudo ./install.sh --uninstall              # macOS/Linux, same manifest
+./install.sh --uninstall --prefix DIR      # if you installed to a custom prefix
+./install-windows.ps1 -Uninstall           # Windows
 ```

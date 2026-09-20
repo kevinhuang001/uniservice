@@ -11,6 +11,7 @@ from tests.conftest import FakeBackend
 from uniservice_lib import cli
 from uniservice_lib.backends.base import ServiceInfo
 from uniservice_lib.errors import UniserviceError
+from uniservice_lib.installation import find_installation
 from uniservice_lib.scope import Scope
 
 pytestmark = pytest.mark.usefixtures("clean_logger")
@@ -348,6 +349,43 @@ def test_main_add_requires_a_command(
 
     assert cli.main(["add", "demo", "--workdir", "/tmp"]) == 1
     assert "Missing COMMAND after --" in capsys.readouterr().err
+
+
+def test_main_uninstall_reports_when_nothing_is_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "find_installation", lambda command=None: None)
+
+    assert cli.main(["uninstall"]) == 1
+
+    assert "no uniservice installation is recorded" in capsys.readouterr().err
+
+
+def test_main_uninstall_dry_run_keeps_everything(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    prefix = tmp_path / "pfx"
+    binary = prefix / "bin" / "uniservice"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    manifest = prefix / "lib" / "uniservice" / "manifest"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        f"kind=zipapp\nversion=1.2.3\nprefix={prefix}\nbinary={binary}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "find_installation", lambda command=None: find_installation(binary))
+
+    assert cli.main(["uninstall", "--dry-run"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Would remove uniservice 1.2.3 (zipapp)" in output
+    assert str(binary) in output
+    assert binary.exists()
+    assert manifest.exists()
 
 
 def test_main_add_requires_a_name(

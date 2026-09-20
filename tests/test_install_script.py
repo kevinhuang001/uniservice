@@ -190,6 +190,25 @@ def test_from_detects_a_standalone_binary(tmp_path: Path) -> None:
     assert manifest_of(prefix)["kind"] == "binary"
 
 
+def test_uninstall_subcommand_removes_the_installation(tmp_path: Path) -> None:
+    """`uniservice uninstall` must undo what install.sh did, including itself."""
+    prefix = tmp_path / "pfx"
+    zipapp = build_zipapp(tmp_path / "dist" / "uniservice")
+    assert run_installer("--prefix", str(prefix), "--from", str(zipapp)).returncode == 0
+
+    completed = subprocess.run(
+        [sys.executable, str(prefix / "bin" / "uniservice"), "uninstall"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Removed uniservice" in completed.stdout
+    assert not prefix.exists()
+
+
 def test_uninstall_leaves_a_prefix_that_holds_other_files(tmp_path: Path) -> None:
     prefix = tmp_path / "pfx"
     stub = make_script_stub(tmp_path / "stub")
