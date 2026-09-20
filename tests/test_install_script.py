@@ -25,6 +25,16 @@ DEFAULT_PREFIX = Path("/usr/local")
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="install.sh is POSIX-only")
 
 
+def _is_root() -> bool:
+    """True on POSIX when running as root.
+
+    ``os.geteuid`` does not exist on Windows, and a ``skipif`` marker is
+    evaluated while the module is imported, before the module-level skip above
+    can take effect.
+    """
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
 def run_installer(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     if env:
@@ -58,7 +68,7 @@ def test_unknown_option_is_rejected() -> None:
     assert "unknown option" in completed.stderr
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can write to /usr/local")
+@pytest.mark.skipif(_is_root(), reason="root can write to /usr/local")
 def test_default_prefix_is_usr_local_and_needs_permission() -> None:
     if os.access(DEFAULT_PREFIX, os.W_OK):
         pytest.skip(f"{DEFAULT_PREFIX} happens to be writable on this host")
@@ -70,7 +80,7 @@ def test_default_prefix_is_usr_local_and_needs_permission() -> None:
     assert not (DEFAULT_PREFIX / "bin" / "uniservice").exists()
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.skipif(_is_root(), reason="root ignores directory permissions")
 def test_unwritable_prefix_fails_before_downloading(tmp_path: Path) -> None:
     prefix = tmp_path / "readonly"
     prefix.mkdir()
