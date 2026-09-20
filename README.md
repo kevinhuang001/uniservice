@@ -45,10 +45,23 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 ```
 
 ```powershell
-# Windows — portable zipapp (needs Python 3.10+), then the standalone .exe
+# Windows — the recommended portable zipapp (needs Python 3.10+)
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
+
+# ... or the standalone .exe, which needs no Python at all
+$env:UNISERVICE_BINARY = 1; iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
+```
+
+Piping into `iex` leaves no file on disk, so the artifact is selected with the
+`UNISERVICE_BINARY` environment variable. If you would rather use the switch, download the script
+first:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 -OutFile install-windows.ps1
 ./install-windows.ps1 -Binary
 ```
+
+The same `UNISERVICE_BINARY=1` environment variable works for `install.sh`.
 
 ### Installer options
 

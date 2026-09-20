@@ -15,6 +15,12 @@
   `uniservice list` works in any shell; every other command creates or changes a
   Scheduled Task that runs as SYSTEM and therefore needs an elevated shell.
 
+  When this script is piped straight into Invoke-Expression there is no file on
+  disk to pass a switch to, so the same choice is available as an environment
+  variable:
+
+    $env:UNISERVICE_BINARY = 1; iwr -useb <url> | iex
+
 .PARAMETER Binary
   Install the standalone binary instead of the portable zipapp.
 
@@ -188,6 +194,11 @@ function Invoke-Install {
   param([string]$TargetPrefix)
 
   $standalone = [bool]$Binary
+  # Same choice as -Binary, for when the script is piped straight into
+  # Invoke-Expression: `iwr ... | iex` leaves no file to pass a switch to.
+  if (-not $standalone -and $env:UNISERVICE_BINARY) {
+    $standalone = $env:UNISERVICE_BINARY -notin @('0', 'false', 'no', 'False', 'No')
+  }
   $asset = Get-AssetName -Standalone:$standalone
   $kind = if ($standalone) { 'binary' } else { 'zipapp' }
 

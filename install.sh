@@ -83,6 +83,7 @@ Options:
   -h, --help            Show this help.
 
 Environment:
+  UNISERVICE_BINARY     Same as --binary (any value except 0/false/no).
   UNISERVICE_REPO_SLUG  GitHub repository (default: $REPO_SLUG).
   UNISERVICE_REPO_URL   Full base URL, for a mirror or a file:// tree
                         (default: https://github.com/<slug>).
@@ -134,6 +135,14 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+# Same choice as --binary, for when the installer is piped into a shell and there
+# is nowhere to put an argument: `curl ... | sudo bash -s -- --binary` works, but
+# `UNISERVICE_BINARY=1 curl ... | sudo bash` is friendlier in scripts.
+case "${UNISERVICE_BINARY:-}" in
+  "" | 0 | false | no | False | No) ;;
+  *) want_binary=1 ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Environment

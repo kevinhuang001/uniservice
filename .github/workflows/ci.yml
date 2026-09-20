@@ -194,6 +194,23 @@ jobs:
         run: |
           ./install-windows.ps1 -Uninstall -Prefix (Join-Path $env:TEMP 'uniservice-does-not-exist')
           Write-Host 'uninstall without a manifest exits cleanly'
+      - name: UNISERVICE_BINARY selects the standalone binary
+        shell: pwsh
+        run: |
+          # `iwr ... | iex` cannot pass a switch, so the env var has to work. A
+          # bogus version makes the failure message name the artifact it chose.
+          $env:UNISERVICE_BINARY = '1'
+          try {
+            ./install-windows.ps1 -Prefix (Join-Path $env:RUNNER_TEMP 'nope') -Version v0.0.0-nonexistent -NoModifyPath
+            throw 'expected the download to fail'
+          } catch {
+            if ("$_" -notmatch 'drop -Binary') {
+              throw "expected the standalone-binary hint, got: $_"
+            }
+            Write-Host 'UNISERVICE_BINARY selected the standalone binary'
+          } finally {
+            Remove-Item Env:\UNISERVICE_BINARY -ErrorAction SilentlyContinue
+          }
 
   test:
     name: Test (${{ matrix.os }} / Python ${{ matrix.python-version }})

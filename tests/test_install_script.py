@@ -334,6 +334,40 @@ def test_binary_flag_explains_itself_when_the_platform_is_missing(tmp_path: Path
     assert "--binary" in completed.stderr  # points at the zipapp alternative
 
 
+def test_uniservice_binary_env_var_selects_the_binary(tmp_path: Path) -> None:
+    """`iwr ... | iex` cannot pass a switch, so the env var must work."""
+    base = build_release_tree(tmp_path, tag="v9.9.9", asset=asset_name())
+    prefix = tmp_path / "pfx"
+
+    completed = run_installer(
+        "--prefix",
+        str(prefix),
+        "--version",
+        "v9.9.9",
+        env={"UNISERVICE_REPO_URL": f"file://{base}", "UNISERVICE_BINARY": "1"},
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert manifest_of(prefix)["kind"] == "binary"
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no"])
+def test_uniservice_binary_env_var_false_keeps_the_zipapp(tmp_path: Path, value: str) -> None:
+    base = build_release_tree(tmp_path, tag="v9.9.9")
+    prefix = tmp_path / "pfx"
+
+    completed = run_installer(
+        "--prefix",
+        str(prefix),
+        "--version",
+        "v9.9.9",
+        env={"UNISERVICE_REPO_URL": f"file://{base}", "UNISERVICE_BINARY": value},
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert manifest_of(prefix)["kind"] == "zipapp"
+
+
 def test_zipapp_download_without_a_shebang_is_rejected(tmp_path: Path) -> None:
     """An error page saved as the asset must never be installed."""
     base = build_release_tree(tmp_path, tag="v9.9.9")

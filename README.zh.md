@@ -42,10 +42,22 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 ```
 
 ```powershell
-# Windows —— 默认便携 zipapp（需要 Python 3.10+），或加 -Binary 装独立 exe
+# Windows —— 推荐的便携 zipapp（需要 Python 3.10+）
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
+
+# ……或者完全不需要 Python 的独立 exe
+$env:UNISERVICE_BINARY = 1; iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
+```
+
+管道喂给 `iex` 时磁盘上没有文件，所以用 `UNISERVICE_BINARY` 环境变量来选择产物。想用开关参数的话，
+先把脚本下载下来：
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 -OutFile install-windows.ps1
 ./install-windows.ps1 -Binary
 ```
+
+`install.sh` 同样认 `UNISERVICE_BINARY=1`。
 
 ### 安装器参数
 
