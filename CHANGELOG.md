@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.1] - 2026-09-20
+
+### Changed
+
+- **The installer targets `/usr/local` and nothing else.** The `~/.local` fallback is gone:
+  when the installer cannot write to `/usr/local` it stops with
+  `ERROR: cannot write to /usr/local; run the installer with sudo`, before downloading anything.
+  `/usr/local/bin` is already on every account's `PATH`, so there is now no PATH handling at
+  all — no shell startup file is read or written, and the manifest no longer carries
+  `profile_files`.
+- Removed the `--user`, `--system` and `--no-modify-path` options together with the code behind
+  them. `--prefix DIR` remains for packaging and tests, where no elevated privileges are wanted
+  or available.
+
 ## [1.2.0] - 2026-09-20
 
 A single self-contained install artifact, and an installer that can undo itself.

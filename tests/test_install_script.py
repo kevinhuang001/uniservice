@@ -1,9 +1,9 @@
 """End-to-end tests for ``install.sh``.
 
 Every test runs the real installer in a subprocess against a throwaway prefix, so
-the install -> verify -> uninstall lifecycle, the manifest and the PATH policy are
-all exercised for real.  ``--from`` is not needed: the installer notices that it
-is running from a checkout and builds the local sources.
+the install -> verify -> uninstall lifecycle, the manifest and the permission
+checks are all exercised for real.  ``--from`` is not needed: the installer
+notices that it is running from a checkout and builds the local sources.
 """
 
 from __future__ import annotations
@@ -20,13 +20,13 @@ import pytest
 from tests.conftest import REPO_ROOT
 
 INSTALLER = REPO_ROOT / "install.sh"
+DEFAULT_PREFIX = Path("/usr/local")
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="install.sh is POSIX-only")
 
 
 def run_installer(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
-    environment.setdefault("SHELL", "/bin/sh")
     if env:
         environment.update(env)
     return subprocess.run(
@@ -43,11 +43,13 @@ def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_help_lists_the_options() -> None:
+def test_help_documents_the_options() -> None:
     completed = run_installer("--help")
     assert completed.returncode == 0
-    for flag in ("--prefix", "--version", "--sha256", "--from", "--uninstall", "--no-modify-path"):
+    for flag in ("--prefix", "--version", "--sha256", "--from", "--uninstall"):
         assert flag in completed.stdout
+    assert "/usr/local" in completed.stdout
+    assert "sudo" in completed.stdout
 
 
 def test_unknown_option_is_rejected() -> None:
@@ -56,10 +58,37 @@ def test_unknown_option_is_rejected() -> None:
     assert "unknown option" in completed.stderr
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write to /usr/local")
+def test_default_prefix_is_usr_local_and_needs_permission() -> None:
+    if os.access(DEFAULT_PREFIX, os.W_OK):
+        pytest.skip(f"{DEFAULT_PREFIX} happens to be writable on this host")
+
+    completed = run_installer()
+
+    assert completed.returncode == 1
+    assert "sudo" in completed.stderr
+    assert not (DEFAULT_PREFIX / "bin" / "uniservice").exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_unwritable_prefix_fails_before_downloading(tmp_path: Path) -> None:
+    prefix = tmp_path / "readonly"
+    prefix.mkdir()
+    prefix.chmod(0o500)
+    try:
+        completed = run_installer("--prefix", str(prefix))
+    finally:
+        prefix.chmod(0o700)
+
+    assert completed.returncode == 1
+    assert "sudo" in completed.stderr
+    assert not (prefix / "bin").exists()
+
+
 def test_install_then_uninstall_round_trip(tmp_path: Path) -> None:
     prefix = tmp_path / "pfx"
 
-    installed = run_installer("--prefix", str(prefix), "--no-modify-path")
+    installed = run_installer("--prefix", str(prefix))
     assert installed.returncode == 0, installed.stderr
 
     binary = prefix / "bin" / "uniservice"
@@ -74,7 +103,7 @@ def test_install_then_uninstall_round_trip(tmp_path: Path) -> None:
     assert len(manifest["sha256"]) == 64
     assert manifest["sha256"] == sha256_of(binary)
     assert manifest["version"]
-    assert manifest["profile_files"] == []
+    assert "profile_files" not in manifest
 
     completed = subprocess.run(
         [sys.executable, str(binary), "--version"],
@@ -97,7 +126,7 @@ def test_install_then_uninstall_round_trip(tmp_path: Path) -> None:
 
 def test_uninstall_leaves_a_prefix_that_holds_other_files(tmp_path: Path) -> None:
     prefix = tmp_path / "pfx"
-    assert run_installer("--prefix", str(prefix), "--no-modify-path").returncode == 0
+    assert run_installer("--prefix", str(prefix)).returncode == 0
     keeper = prefix / "keep.txt"
     keeper.write_text("not ours\n", encoding="utf-8")
 
@@ -108,10 +137,29 @@ def test_uninstall_leaves_a_prefix_that_holds_other_files(tmp_path: Path) -> Non
     assert not (prefix / "lib").exists()
 
 
+def test_installer_never_touches_shell_startup_files(tmp_path: Path) -> None:
+    """The installer targets /usr/local and must not edit any profile."""
+    home = tmp_path / "userhome"
+    home.mkdir(exist_ok=True)
+    startup_files = {
+        home / ".bashrc": "# bashrc\n",
+        home / ".zshrc": "# zshrc\n",
+        home / ".profile": "# profile\n",
+    }
+    for path, content in startup_files.items():
+        path.write_text(content, encoding="utf-8")
+
+    completed = run_installer("--prefix", str(tmp_path / "pfx"), env={"HOME": str(home)})
+
+    assert completed.returncode == 0, completed.stderr
+    for path, content in startup_files.items():
+        assert path.read_text(encoding="utf-8") == content
+
+
 def test_installed_artifact_is_a_single_self_contained_file(tmp_path: Path) -> None:
     """Copying just the executable to a bare directory must be enough."""
     prefix = tmp_path / "pfx"
-    assert run_installer("--prefix", str(prefix), "--no-modify-path").returncode == 0
+    assert run_installer("--prefix", str(prefix)).returncode == 0
 
     standalone = tmp_path / "elsewhere" / "uniservice"
     standalone.parent.mkdir()
@@ -136,7 +184,7 @@ def test_checksum_verification_accepts_the_reproducible_build(tmp_path: Path) ->
     digest = build_module.sha256_of(reference)
 
     prefix = tmp_path / "pfx"
-    completed = run_installer("--prefix", str(prefix), "--no-modify-path", "--sha256", digest)
+    completed = run_installer("--prefix", str(prefix), "--sha256", digest)
     assert completed.returncode == 0, completed.stderr
     assert "SHA-256 verified" in completed.stdout
     assert sha256_of(prefix / "bin" / "uniservice") == digest
@@ -144,7 +192,7 @@ def test_checksum_verification_accepts_the_reproducible_build(tmp_path: Path) ->
 
 def test_checksum_verification_rejects_a_wrong_digest(tmp_path: Path) -> None:
     prefix = tmp_path / "pfx"
-    completed = run_installer("--prefix", str(prefix), "--no-modify-path", "--sha256", "deadbeef")
+    completed = run_installer("--prefix", str(prefix), "--sha256", "deadbeef")
     assert completed.returncode == 1
     assert "SHA-256 mismatch" in completed.stderr
     assert not (prefix / "bin" / "uniservice").exists()
@@ -154,52 +202,3 @@ def test_from_requires_the_package(tmp_path: Path) -> None:
     completed = run_installer("--prefix", str(tmp_path / "pfx"), "--from", str(tmp_path))
     assert completed.returncode == 1
     assert "does not contain uniservice_lib" in completed.stderr
-
-
-def test_default_user_prefix_and_profile_update(tmp_path: Path) -> None:
-    home = tmp_path / "userhome"
-    home.mkdir(exist_ok=True)
-    bashrc = home / ".bashrc"
-    bashrc.write_text("# existing content\n", encoding="utf-8")
-    environment = {"HOME": str(home), "SHELL": "/bin/bash"}
-
-    completed = run_installer("--user", env=environment)
-    assert completed.returncode == 0, completed.stderr
-
-    binary = home / ".local" / "bin" / "uniservice"
-    assert binary.is_file()
-
-    contents = bashrc.read_text(encoding="utf-8")
-    assert contents.count('export PATH="$HOME/.local/bin:$PATH"') == 1
-
-    manifest = json.loads((home / ".local" / "lib" / "uniservice" / "install.json").read_text(encoding="utf-8"))
-    assert manifest["profile_files"] == [str(bashrc)]
-
-    # Re-installing must not append the line a second time.
-    again = run_installer("--user", env=environment)
-    assert again.returncode == 0, again.stderr
-    assert bashrc.read_text(encoding="utf-8").count('export PATH="$HOME/.local/bin:$PATH"') == 1
-
-
-def test_no_modify_path_leaves_the_shell_files_alone(tmp_path: Path) -> None:
-    home = tmp_path / "userhome"
-    home.mkdir(exist_ok=True)
-    bashrc = home / ".bashrc"
-    bashrc.write_text("# existing content\n", encoding="utf-8")
-    environment = {"HOME": str(home), "SHELL": "/bin/bash"}
-
-    completed = run_installer("--user", "--no-modify-path", env=environment)
-    assert completed.returncode == 0, completed.stderr
-    assert bashrc.read_text(encoding="utf-8") == "# existing content\n"
-    assert "add this to your shell startup file" in completed.stdout
-
-
-def test_zsh_users_get_a_zshrc_hint(tmp_path: Path) -> None:
-    home = tmp_path / "userhome"
-    home.mkdir(exist_ok=True)
-    zshrc = home / ".zshrc"
-    zshrc.write_text("", encoding="utf-8")
-
-    completed = run_installer("--user", env={"HOME": str(home), "SHELL": "/bin/zsh"})
-    assert completed.returncode == 0, completed.stderr
-    assert 'export PATH="$HOME/.local/bin:$PATH"' in zshrc.read_text(encoding="utf-8")

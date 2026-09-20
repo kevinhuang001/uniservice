@@ -3,15 +3,16 @@
 # uniservice installer.
 #
 # Installs a single self-contained `uniservice` executable (a Python zipapp) at
-# <prefix>/bin/uniservice and records the installation in
-# <prefix>/lib/uniservice/install.json.
+# /usr/local/bin/uniservice and records the installation in
+# /usr/local/lib/uniservice/install.json.
 #
-# Because the program is one file, a single installation serves both scopes:
+# Because the program is one file, one installation serves both scopes:
 #
 #   uniservice ...        -> per-user services
 #   sudo uniservice ...   -> system-wide services
 #
-# so the default prefix is a shared one (/usr/local) whenever that is possible.
+# /usr/local/bin is on every account's PATH, so nothing else has to be arranged.
+# Writing there needs root: run the installer with sudo, or it fails.
 #
 set -euo pipefail
 
@@ -21,17 +22,15 @@ PROGRAM_NAME="uniservice"
 PACKAGE_NAME="uniservice_lib"
 MANIFEST_NAME="install.json"
 DEFAULT_INTERPRETER="/usr/bin/env python3"
+DEFAULT_PREFIX="/usr/local"
 
 prefix=""
-mode=""
 version=""
 expected_sha256=""
 from_dir=""
-no_modify_path=0
 uninstall=0
 
 tmp_dir=""
-profile_files=""
 
 log() { printf '%s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -48,19 +47,22 @@ usage() {
   cat <<EOF
 Usage: install.sh [OPTIONS]
 
-Installs $PROGRAM_NAME for the current user or system-wide.
+Installs $PROGRAM_NAME into $DEFAULT_PREFIX. One installation there serves both
+scopes: '$PROGRAM_NAME ...' manages per-user services and 'sudo $PROGRAM_NAME ...'
+manages system services.
+
+The installer must be able to write to $DEFAULT_PREFIX, so run it with sudo when
+you are not root. It never edits shell startup files: $DEFAULT_PREFIX/bin is
+already on PATH.
 
 Options:
-  --user                Install for the current user (prefix ~/.local).
-  --system              Install system-wide (prefix /usr/local).
-  --prefix DIR          Install under DIR (DIR/bin/$PROGRAM_NAME).
-                        Default: /usr/local when running as root, ~/.local otherwise.
+  --prefix DIR          Install under DIR instead of $DEFAULT_PREFIX. For
+                        packaging and tests; needs no elevated privileges.
   --version TAG         Install a specific release, e.g. --version v1.2.0.
                         Default: the latest release, else the main branch archive.
   --sha256 HEX          Verify the downloaded artifact against this SHA-256 digest.
   --from DIR            Build from a local checkout instead of downloading
                         (DIR must contain $PACKAGE_NAME/).
-  --no-modify-path      Never edit shell startup files, only print instructions.
   --uninstall           Remove a previous installation recorded in the manifest.
   -h, --help            Show this help.
 
@@ -68,11 +70,9 @@ Environment:
   UNISERVICE_REPO_SLUG  Override the GitHub repository (default: $REPO_SLUG).
 
 Examples:
-  curl -fsSL $REPO_URL/raw/main/install.sh | bash
   curl -fsSL $REPO_URL/raw/main/install.sh | sudo bash
-  ./install.sh --user --no-modify-path --prefix "\$HOME/opt"
   ./install.sh --version v1.2.0 --sha256 <digest>
-  ./install.sh --uninstall
+  sudo ./install.sh --uninstall
 EOF
 }
 
@@ -81,8 +81,6 @@ EOF
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --user) mode="user" ;;
-    --system) mode="system" ;;
     --prefix)
       [[ $# -ge 2 ]] || die "--prefix requires a value"
       prefix="$2"
@@ -107,7 +105,6 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --from=*) from_dir="${1#*=}" ;;
-    --no-modify-path) no_modify_path=1 ;;
     --uninstall) uninstall=1 ;;
     -h | --help)
       usage
@@ -122,19 +119,12 @@ done
 # Environment
 # ---------------------------------------------------------------------------
 os_name="$(uname -s 2>/dev/null || echo unknown)"
-uid="$(id -u 2>/dev/null || echo 0)"
 
 if [[ -z "$prefix" ]]; then
-  if [[ "$mode" == "system" || ( -z "$mode" && "$uid" -eq 0 ) ]]; then
-    prefix="/usr/local"
-  else
-    prefix="${HOME}/.local"
-  fi
+  prefix="$DEFAULT_PREFIX"
 fi
-# Normalise so that `--prefix ~/.local/` and `--prefix $HOME/.local` compare equal.
 prefix="${prefix%/}"
-mkdir -p "$prefix" 2>/dev/null || die "cannot create prefix $prefix (use --user, or run with sudo)"
-prefix="$(cd "$prefix" && pwd)"
+[[ -n "$prefix" ]] || die "--prefix requires a non-empty value"
 
 bin_dir="$prefix/bin"
 lib_dir="$prefix/lib/$PROGRAM_NAME"
@@ -322,6 +312,7 @@ resolve_artifact() {
 # ---------------------------------------------------------------------------
 if [[ "$uninstall" -eq 1 ]]; then
   [[ -f "$manifest" ]] || die "no installation recorded at $manifest"
+  [[ -w "$bin_dir" && -w "$lib_dir" ]] || die "cannot remove the installation under $prefix; run the installer with sudo"
   UNISERVICE_MANIFEST="$manifest" "$python_bin" - <<'PY'
 import json
 import os
@@ -359,12 +350,6 @@ if isinstance(prefix, str) and prefix:
 print(f"Removed {len(removed)} file(s) from the {data.get('version', 'unknown')} installation:")
 for item in removed:
     print(f"  {item}")
-
-profiles = [p for p in data.get("profile_files", []) if p]
-if profiles:
-    print("The PATH line added by the installer was left in place; delete it if you want:")
-    for profile in profiles:
-        print(f"  {profile}")
 PY
   log "OK: uninstalled uniservice from $prefix"
   exit 0
@@ -392,6 +377,16 @@ fi
 
 python_is_supported "$python_bin" || die "Python 3.10 or newer is required, but $python_bin is $("$python_bin" -V 2>&1)"
 
+# Fail before downloading anything: the target prefix must be writable.
+mkdir -p "$prefix" 2>/dev/null || die "cannot create $prefix; run the installer with sudo"
+[[ -w "$prefix" ]] || die "cannot write to $prefix; run the installer with sudo"
+mkdir -p "$bin_dir" "$lib_dir" 2>/dev/null || die "cannot create $bin_dir and $lib_dir; run the installer with sudo"
+[[ -w "$bin_dir" && -w "$lib_dir" ]] || die "cannot write to $bin_dir and $lib_dir; run the installer with sudo"
+prefix="$(cd "$prefix" && pwd)"
+bin_dir="$prefix/bin"
+lib_dir="$prefix/lib/$PROGRAM_NAME"
+manifest="$lib_dir/$MANIFEST_NAME"
+
 tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t uniservice)"
 artifact="$tmp_dir/$PROGRAM_NAME"
 
@@ -413,9 +408,6 @@ if [[ -z "$installed_version" ]]; then
   [[ -n "$installed_version" ]] || installed_version="unknown"
 fi
 
-mkdir -p "$bin_dir" "$lib_dir" 2>/dev/null ||
-  die "cannot write to $prefix (use --user, or run the installer with sudo)"
-
 # Atomic replace: never leave a half-written executable behind.
 staged_binary="$bin_dir/.$PROGRAM_NAME.tmp.$$"
 trap 'rm -f "$staged_binary"; cleanup' EXIT
@@ -427,47 +419,10 @@ log "Installed $bin_dir/$PROGRAM_NAME (version $installed_version)"
 # ---------------------------------------------------------------------------
 # PATH
 # ---------------------------------------------------------------------------
-append_export() {
-  # append_export RC_FILE EXPORT_LINE
-  local rc_file="$1" export_line="$2"
-  if [[ -f "$rc_file" ]] && grep -Fqs "$export_line" "$rc_file" 2>/dev/null; then
-    return 0
-  fi
-  if ! printf '\n# Added by the uniservice installer\n%s\n' "$export_line" >>"$rc_file" 2>/dev/null; then
-    warn "could not update $rc_file"
-    return 0
-  fi
-  profile_files="${profile_files:+$profile_files:}$rc_file"
-  log "Added $bin_dir to PATH in $rc_file"
-}
-
-user_rc_file() {
-  case "$(basename "${SHELL:-}")" in
-    zsh) printf '%s\n' "$HOME/.zshrc" ;;
-    bash)
-      if [[ -f "$HOME/.bashrc" ]]; then printf '%s\n' "$HOME/.bashrc"; else printf '%s\n' "$HOME/.profile"; fi
-      ;;
-    *) printf '%s\n' "$HOME/.profile" ;;
-  esac
-}
-
-if [[ ":$PATH:" == *":$bin_dir:"* ]]; then
-  log "Note: $bin_dir is already on PATH"
-elif [[ "$prefix" == "$HOME/.local" ]]; then
-  if [[ "$no_modify_path" -eq 1 ]]; then
-    log "Note: add this to your shell startup file:"
-    log "  export PATH=\"$bin_dir:\$PATH\""
-  else
-    # shellcheck disable=SC2016  # the literal $PATH must reach the rc file
-    append_export "$(user_rc_file)" 'export PATH="$HOME/.local/bin:$PATH"'
-  fi
-elif [[ "$uid" -eq 0 || "$mode" == "system" ]]; then
-  # /usr/local/bin is on PATH for every account by default; never edit /etc/profile.
-  if [[ "$uid" -ne 0 ]]; then
-    warn "$bin_dir is not on PATH for this shell; it will be after a new login"
-  fi
-else
-  warn "$bin_dir is not on PATH; add it yourself (the installer never edits system files)"
+# /usr/local/bin is on every account's PATH, so the installer never edits shell
+# startup files.  Only a custom --prefix can need a note.
+if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
+  warn "$bin_dir is not on PATH in this shell"
 fi
 
 # ---------------------------------------------------------------------------
@@ -479,7 +434,6 @@ UNISERVICE_MANIFEST="$manifest" \
   UNISERVICE_PREFIX="$prefix" \
   UNISERVICE_BINARY="$bin_dir/$PROGRAM_NAME" \
   UNISERVICE_REPO="$REPO_SLUG" \
-  UNISERVICE_PROFILES="$profile_files" \
   "$python_bin" - <<'PY'
 import datetime
 import json
@@ -497,7 +451,6 @@ data = {
     "prefix": os.environ["UNISERVICE_PREFIX"],
     "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "files": [os.environ["UNISERVICE_BINARY"]],
-    "profile_files": [p for p in os.environ.get("UNISERVICE_PROFILES", "").split(":") if p],
 }
 manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
@@ -505,10 +458,5 @@ PY
 log ""
 log "OK: installed $PROGRAM_NAME $installed_version"
 log "Hint: $PROGRAM_NAME --help"
-if [[ "$prefix" == "/usr/local" ]]; then
-  log "Note: one installation serves both scopes: '$PROGRAM_NAME ...' for user services,"
-  log "      'sudo $PROGRAM_NAME ...' for system services."
-else
-  log "Note: for system services call this install by absolute path (sudo resets PATH):"
-  log "      sudo $bin_dir/$PROGRAM_NAME ..."
-fi
+log "Note: one installation serves both scopes: '$PROGRAM_NAME ...' for user services,"
+log "      'sudo $PROGRAM_NAME ...' for system services."

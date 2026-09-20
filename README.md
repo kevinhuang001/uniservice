@@ -19,16 +19,17 @@ dependencies beyond Python 3.10+). Having a single file is what lets *one* insta
 both scopes: the same `/usr/local/bin/uniservice` runs as you (per-user services) and through
 `sudo` (system services).
 
-The installer therefore defaults to a **shared prefix** (`/usr/local`, which is already on
-`PATH` for every account) and only falls back to `~/.local` when there is no permission to
-do that. It never edits `/etc/profile`, it records everything it created in a manifest, and it
-can undo the installation exactly.
+The installer therefore installs to **`/usr/local` and nothing else**. `/usr/local/bin` is
+already on `PATH` for every account, so it never edits a shell profile; it records what it
+created in a manifest and can undo the installation exactly.
+
+Writing to `/usr/local` needs root, and the installer does not silently fall back somewhere
+else: **run it with `sudo` or it stops with an error**. No `~/.local` install, no PATH edits.
 
 ### One-liner
 
 ```bash
-# macOS / Linux — installs to /usr/local when run with sudo, to ~/.local otherwise
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
 ```
 
@@ -40,19 +41,18 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 ### Installer options
 
 ```
---user / --system      choose the scope of the *installation* (default: root -> /usr/local)
---prefix DIR           install under DIR (DIR/bin/uniservice)
+--prefix DIR           install under DIR instead of /usr/local
+                       (for packaging and tests; needs no elevated privileges)
 --version TAG          install a specific release, e.g. --version v1.2.0
 --sha256 HEX           verify the downloaded artifact against this digest
 --from DIR             build from a local checkout instead of downloading
---no-modify-path       never edit shell startup files, only print instructions
 --uninstall            remove a previous installation, using its manifest
 ```
 
 ```bash
-./install.sh --version v1.2.0 --sha256 "$(cat uniservice.sha256 | awk '{print $1}')"
-./install.sh --user --prefix "$HOME/opt" --no-modify-path
-./install.sh --uninstall
+sudo ./install.sh --version v1.2.0 --sha256 "$(awk '{print $1}' uniservice.sha256)"
+./install.sh --prefix /tmp/uniservice-test      # unprivileged, for packaging/tests
+sudo ./install.sh --uninstall
 ```
 
 Each release publishes `uniservice` (the zipapp), a wheel, an sdist and `SHA256SUMS`; the
@@ -66,7 +66,7 @@ install. When the repository has no release yet the installer falls back to buil
 curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice
 curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice.sha256
 sha256sum -c uniservice.sha256
-install -m 0755 uniservice /usr/local/bin/uniservice   # or ~/.local/bin
+sudo install -m 0755 uniservice /usr/local/bin/uniservice
 ```
 
 ### Alternatives
@@ -101,13 +101,8 @@ The scope is derived from your privileges, not from a flag:
 | `uniservice ...` | user | `~/.config/systemd/user/`, `~/Library/LaunchAgents/` |
 | `sudo uniservice ...` | system | `/etc/systemd/system/`, `/Library/LaunchDaemons/` |
 
-Because the default install prefix is `/usr/local` (already on every account's `PATH`),
-`sudo uniservice ...` works out of the box there. Only a `--user` install (prefix `~/.local`) needs
-the absolute path, since `sudo` resets `PATH` to the sudoers `secure_path`:
-
-```bash
-sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.server 8000
-```
+Because the installer puts the command in `/usr/local/bin` (on every account's `PATH`), both
+forms work with no further setup.
 
 Two things change under `sudo`:
 
@@ -115,12 +110,6 @@ Two things change under `sudo`:
   resolve to `/usr/bin/python3` instead of your conda/venv copy — pass an
   absolute path when that matters;
 - the definition and its logs belong to root (`/root/.uniservice/logs/`).
-
-Alternatively link the user install into the shared prefix once:
-
-```bash
-sudo ln -sf "$(command -v uniservice)" /usr/local/bin/uniservice
-```
 
 On Windows there is no `sudo`: `uniservice list` works in any shell, every other
 command needs an **Administrator** PowerShell/CMD.
@@ -240,7 +229,7 @@ Build the release artifact and try the installer against a throwaway prefix:
 
 ```bash
 python scripts/build_zipapp.py --output dist/uniservice
-./install.sh --prefix /tmp/uniservice-test --no-modify-path
+./install.sh --prefix /tmp/uniservice-test
 /tmp/uniservice-test/bin/uniservice --version
 ./install.sh --uninstall --prefix /tmp/uniservice-test
 ```
@@ -262,8 +251,8 @@ and `SHA256SUMS` as a GitHub release.
 ## Uninstall
 
 ```bash
-./install.sh --uninstall              # macOS/Linux, uses the recorded manifest
-./install.sh --uninstall --prefix DIR # if you installed to a custom prefix
+sudo ./install.sh --uninstall              # macOS/Linux, uses the recorded manifest
+./install.sh --uninstall --prefix DIR      # if you installed to a custom prefix
 ```
 
 ```powershell
@@ -271,9 +260,9 @@ and `SHA256SUMS` as a GitHub release.
 pipx uninstall uniservice             # if you installed with pipx
 ```
 
-The installer removes exactly what it recorded in `<prefix>/lib/uniservice/install.json`. It leaves the
-`PATH` line it added to your shell startup file behind on purpose and tells you which file to edit.
-Remember to remove the services you created first:
+The installer removes exactly what it recorded in `/usr/local/lib/uniservice/install.json` and
+prunes the directories that become empty. It never added a `PATH` line to remove. Remember to
+remove the services you created first:
 
 ```bash
 uniservice list

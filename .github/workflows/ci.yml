@@ -47,11 +47,33 @@ jobs:
         run: shellcheck install.sh
       - name: bash syntax
         run: bash -n install.sh
-      - name: Install and uninstall round trip
+      - name: Refuses to install without permission
+        run: |
+          set -euo pipefail
+          if ./install.sh >installer.log 2>&1; then
+            echo "expected the installer to fail without sudo"
+            cat installer.log
+            exit 1
+          fi
+          grep -q "sudo" installer.log
+          test ! -e /usr/local/bin/uniservice
+      - name: Installs to the default prefix with sudo
+        run: |
+          set -euo pipefail
+          sudo ./install.sh
+          trap 'sudo ./install.sh --uninstall || true' EXIT
+          command -v uniservice
+          uniservice --version
+          uniservice list
+          test -f /usr/local/lib/uniservice/install.json
+          sudo ./install.sh --uninstall
+          test ! -e /usr/local/bin/uniservice
+          trap - EXIT
+      - name: Install and uninstall round trip into a custom prefix
         run: |
           set -euo pipefail
           prefix="$(mktemp -d)/uniservice"
-          ./install.sh --prefix "$prefix" --no-modify-path
+          ./install.sh --prefix "$prefix"
           "$prefix/bin/uniservice" --version
           "$prefix/bin/uniservice" list
           python - "$prefix/lib/uniservice/install.json" <<'PY'
@@ -60,6 +82,7 @@ jobs:
           assert data["version"], data
           assert len(data["sha256"]) == 64, data
           assert data["files"], data
+          assert "profile_files" not in data, data
           print("manifest OK:", data["version"], data["sha256"][:12])
           PY
           ./install.sh --uninstall --prefix "$prefix"

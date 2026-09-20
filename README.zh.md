@@ -18,14 +18,16 @@
 外无任何依赖）。之所以坚持单文件，是因为它让**一次安装同时服务两种 scope**：同一个
 `/usr/local/bin/uniservice`，你自己运行就是用户级服务，`sudo` 运行就是系统级服务。
 
-因此安装器默认装到**共享前缀** `/usr/local`（每个账号的 `PATH` 里本来就有它），没有权限时才退回
-`~/.local`。它不会再改 `/etc/profile`，会把创建的每个文件记录进 manifest，并据此精确卸载。
+因此安装器**只装到 `/usr/local`**。`/usr/local/bin` 本来就在每个账号的 `PATH` 里，所以它不会去改任何
+shell 启动文件；它会把创建的每个文件记录进 manifest，并据此精确卸载。
+
+写 `/usr/local` 需要 root，而安装器**不会偷偷退回别的位置**：不带 `sudo` 运行会直接报错。
+没有 `~/.local` 安装，也没有 PATH 改写。
 
 ### 一行安装
 
 ```bash
-# macOS / Linux —— 加 sudo 就装到 /usr/local，否则装到 ~/.local
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
 ```
 
@@ -37,19 +39,18 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 ### 安装器参数
 
 ```
---user / --system      选择"安装"的 scope（默认：root -> /usr/local）
---prefix DIR           装到 DIR（即 DIR/bin/uniservice）
+--prefix DIR           装到 DIR 而不是 /usr/local
+                       （给打包和测试用，不需要提权）
 --version TAG          安装指定 release，例如 --version v1.2.0
 --sha256 HEX           校验下载产物的 SHA-256
 --from DIR             从本地代码仓库构建，不走网络
---no-modify-path       不改任何 shell 启动文件，只打印提示
 --uninstall            按 manifest 精确卸载
 ```
 
 ```bash
-./install.sh --version v1.2.0 --sha256 "$(awk '{print $1}' uniservice.sha256)"
-./install.sh --user --prefix "$HOME/opt" --no-modify-path
-./install.sh --uninstall
+sudo ./install.sh --version v1.2.0 --sha256 "$(awk '{print $1}' uniservice.sha256)"
+./install.sh --prefix /tmp/uniservice-test      # 不提权，用于打包/测试
+sudo ./install.sh --uninstall
 ```
 
 每次 release 会发布 `uniservice`（zipapp）、wheel、sdist 和 `SHA256SUMS`；zipapp 的构建是**逐字节
@@ -62,7 +63,7 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice
 curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice.sha256
 sha256sum -c uniservice.sha256
-install -m 0755 uniservice /usr/local/bin/uniservice   # 或 ~/.local/bin
+sudo install -m 0755 uniservice /usr/local/bin/uniservice
 ```
 
 ### 其它安装方式
@@ -96,25 +97,13 @@ uniservice --help
 | `uniservice ...` | user（当前用户） | `~/.config/systemd/user/`、`~/Library/LaunchAgents/` |
 | `sudo uniservice ...` | system（整机） | `/etc/systemd/system/`、`/Library/LaunchDaemons/` |
 
-默认前缀是 `/usr/local`（每个账号的 `PATH` 都包含它），所以那里装的 `sudo uniservice ...` 直接可用。
-只有 `--user` 安装（前缀 `~/.local`）才需要用绝对路径，因为 `sudo` 会把 `PATH` 重置成 sudoers 的
-`secure_path`：
-
-```bash
-sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.server 8000
-```
+安装器把命令放进 `/usr/local/bin`（每个账号的 `PATH` 都包含它），所以两种用法都不需要额外设置。
 
 在 `sudo` 下有两处行为差异：
 
 - `--` 后面的命令是用 **root 的 `PATH`** 解析的，`python3` 可能解析到 `/usr/bin/python3` 而不是你的
   conda/venv；在意的话请传绝对路径；
 - 定义文件和日志属于 root（`/root/.uniservice/logs/`）。
-
-也可以把用户安装链接进共享前缀：
-
-```bash
-sudo ln -sf "$(command -v uniservice)" /usr/local/bin/uniservice
-```
 
 Windows 没有 `sudo`：`uniservice list` 在普通终端即可运行，其它命令需要 **管理员** PowerShell/CMD。
 
@@ -232,7 +221,7 @@ python -m pytest        # 单元 + 端到端测试
 
 ```bash
 python scripts/build_zipapp.py --output dist/uniservice
-./install.sh --prefix /tmp/uniservice-test --no-modify-path
+./install.sh --prefix /tmp/uniservice-test
 /tmp/uniservice-test/bin/uniservice --version
 ./install.sh --uninstall --prefix /tmp/uniservice-test
 ```
@@ -253,8 +242,8 @@ CI 会在 Ubuntu、macOS、Windows 上运行静态检查、shellcheck/PowerShell
 ## 卸载
 
 ```bash
-./install.sh --uninstall              # macOS/Linux，按记录的 manifest 卸载
-./install.sh --uninstall --prefix DIR # 装在自定义前缀时
+sudo ./install.sh --uninstall          # macOS/Linux，按记录的 manifest 卸载
+./install.sh --uninstall --prefix DIR  # 装在自定义前缀时
 ```
 
 ```powershell
@@ -262,8 +251,8 @@ CI 会在 Ubuntu、macOS、Windows 上运行静态检查、shellcheck/PowerShell
 pipx uninstall uniservice             # 用 pipx 安装的情况
 ```
 
-安装器只会删除记录在 `<prefix>/lib/uniservice/install.json` 里的内容。它**故意保留**写进 shell 启动文件
-的那行 `PATH`，并告诉你该改哪个文件。别忘了先删掉自己创建的服务：
+安装器只删除记录在 `/usr/local/lib/uniservice/install.json` 里的内容，并把因此变空的目录清理掉；它从未
+写过任何 `PATH` 行，所以没有需要清理的东西。别忘了先删掉自己创建的服务：
 
 ```bash
 uniservice list
