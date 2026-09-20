@@ -95,6 +95,11 @@ jobs:
         run: |
           set -euo pipefail
           ls -l dist
+          # upload-artifact/download-artifact does not preserve file modes, so a
+          # freshly collected zipapp is not executable yet.  (Release assets do
+          # not carry a mode either, which is why install.sh chmods whatever it
+          # downloads.)
+          chmod +x dist/uniservice
           version="$(dist/uniservice --version | awk '{print $2}')"
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "::warning title=version mismatch::tag ${GITHUB_REF_NAME} but the artifacts report ${version}"
