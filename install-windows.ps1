@@ -326,7 +326,9 @@ if (`$env:Path -notlike "*`$uniserviceBin*") { `$env:Path = `$env:Path + ';' + `
       "shim=$shim"
       "installed_at=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
     )
-    Set-Content -LiteralPath (Get-ManifestPath -TargetPrefix $TargetPrefix) -Value $lines -Encoding UTF8
+    $manifestPath = Get-ManifestPath -TargetPrefix $TargetPrefix
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $manifestPath) | Out-Null
+    Set-Content -LiteralPath $manifestPath -Value $lines -Encoding UTF8
 
     Write-Step ''
     Write-Step "OK: installed $ProgramName $installedVersion ($kind)"
