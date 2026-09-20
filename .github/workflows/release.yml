@@ -53,8 +53,23 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/* --clobber
-          else
-            gh release create "$tag" --title "$tag" --generate-notes dist/*
+          publish() {
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" dist/* --clobber
+            else
+              gh release create "$tag" --title "$tag" --generate-notes dist/*
+            fi
+          }
+          if ! log="$(publish 2>&1)"; then
+            printf '%s\n' "$log" >&2
+            # Job logs need repository admin rights to download, so report the
+            # failure as a check annotation as well.
+            python3 - "$log" <<'PY'
+          import sys
+          import urllib.parse
+
+          print("::error title=gh release failed::" + urllib.parse.quote(sys.argv[1], safe=""))
+          PY
+            exit 1
           fi
+          printf '%s\n' "$log"
