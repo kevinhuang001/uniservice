@@ -144,7 +144,24 @@ def parse_add_argv(argv: Sequence[str]) -> AddRequest:
         command_parts = rest[index:]
         break
 
+    _validate_command(command_parts)
     return AddRequest(name=name, workdir=workdir, command_parts=tuple(command_parts))
+
+
+def _validate_command(command_parts: Sequence[str]) -> None:
+    """Reject a command the native supervisors could not run.
+
+    Every backend wraps the command as ``<shell> -lc '<cmd>'``, and the shell
+    parses that string as a script: a leading ``-`` is taken as an *option to the
+    shell itself*, so ``--`` produces ``bash: --: invalid option`` and the full
+    usage text on every restart.  Saying so once beats a service that floods its
+    log.
+    """
+    if command_parts and command_parts[0].startswith("-"):
+        raise UniserviceError(
+            f'Invalid COMMAND: "{command_parts[0]}" starts with "-", which the shell would read as an '
+            'option. Did you add an extra "--"? Write the program to run after a single "--".'
+        )
 
 
 def format_tristate(value: bool | None) -> str:

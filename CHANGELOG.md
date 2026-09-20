@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `add` rejects a COMMAND whose first word starts with `-` (an extra `--` being the usual cause).
+  Every backend runs the command as `<shell> -lc '<cmd>'` and the shell parses that string as a
+  script, so `bash -lc '-- python3 -m http.server 8000'` answers `bash: --: invalid option`
+  followed by the whole usage text - and `Restart=always` / `KeepAlive=true` repeats it on every
+  restart, which looks like the service is flooding its log.
+
 ## [1.4.0] - 2026-09-20
 
 ### Added

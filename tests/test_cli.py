@@ -62,6 +62,18 @@ def test_parse_add_argv_requires_a_name(argv: list[str]) -> None:
         cli.parse_add_argv(argv)
 
 
+@pytest.mark.parametrize("first", ["--", "-x", "-"])
+def test_parse_add_argv_rejects_a_command_the_shell_would_misread(first: str) -> None:
+    """`bash -lc '-- ...'` prints its usage on every restart, so refuse it."""
+    with pytest.raises(UniserviceError, match="starts with"):
+        cli.parse_add_argv(["demo", "--workdir", "/tmp", "--", first, "python3", "-m", "http.server"])
+
+
+def test_parse_add_argv_accepts_a_path_that_merely_starts_with_a_dot() -> None:
+    request = cli.parse_add_argv(["demo", "--", "./server", "--flag"])
+    assert request.command_parts == ("./server", "--flag")
+
+
 def test_parse_add_argv_requires_a_workdir_value() -> None:
     with pytest.raises(UniserviceError, match="Missing value for --workdir"):
         cli.parse_add_argv(["demo", "--workdir"])
