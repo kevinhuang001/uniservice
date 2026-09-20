@@ -23,7 +23,7 @@ from ..logging_utils import logger
 from ..naming import parse_windows_task_name, windows_task_name
 from ..platform_utils import is_admin_windows, win_cmdline_split
 from ..process import run
-from .base import Backend, ServiceInfo, classify_state
+from .base import Backend, ServiceInfo, classify_state, clear_files
 
 __all__ = [
     "WINDOWS_NOT_RUNNING_STATES",
@@ -197,6 +197,9 @@ class WindowsBackend(Backend):
     def create(self, name: str, workdir: Path, command_parts: list[str]) -> None:
         logger.info("windows create name=%s workdir=%s", name, workdir)
         self._require_admin()
+        # A re-created task must not inherit the previous one's captured output.
+        log_dir = win_log_dir()
+        clear_files(log_dir / f"{name}.out.log", log_dir / f"{name}.err.log")
         run(
             [
                 SCHTASKS,
@@ -271,6 +274,8 @@ class WindowsBackend(Backend):
             )
         else:
             for path in (out_path, err_path):
+                # Label the file: the two dumps are otherwise indistinguishable.
+                print(f"==> {path} <==")
                 run(
                     [
                         POWERSHELL,

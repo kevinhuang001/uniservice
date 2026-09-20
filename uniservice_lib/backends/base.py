@@ -11,9 +11,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..logging_utils import logger
 from ..scope import Scope
 
-__all__ = ["Backend", "ServiceInfo", "classify_state", "first_token"]
+__all__ = ["Backend", "ServiceInfo", "classify_state", "clear_files", "first_token"]
 
 
 @dataclass(frozen=True)
@@ -109,3 +110,23 @@ def classify_state(*texts: str, true_states: frozenset[str], false_states: froze
     if token in false_states:
         return False
     return None
+
+
+def clear_files(*paths: Path) -> list[Path]:
+    """Delete the *paths* that exist and return the ones actually removed.
+
+    The file-based backends call this before writing a new definition so that a
+    service re-created under the same name starts with an empty log instead of
+    inheriting the previous incarnation's output.
+    """
+    removed: list[Path] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.debug("could not remove the old log %s: %s", path, exc)
+            continue
+        removed.append(path)
+    return removed

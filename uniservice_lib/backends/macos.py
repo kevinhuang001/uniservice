@@ -22,7 +22,7 @@ from ..naming import (
 from ..platform_utils import is_root_unix, sudo_target_uid, user_home_for_uid
 from ..process import command_string, run
 from ..scope import Scope
-from .base import Backend, ServiceInfo
+from .base import Backend, ServiceInfo, clear_files
 
 __all__ = [
     "MacOSBackend",
@@ -249,6 +249,7 @@ class MacOSBackend(Backend):
 
         out_path, err_path = macos_log_paths(name, self.scope)
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        clear_files(out_path, err_path)
 
         content = render_plist(
             self._label(name),
@@ -321,11 +322,13 @@ class MacOSBackend(Backend):
             if isinstance(plist_err, str) and plist_err.strip():
                 err_path = Path(plist_err.strip())
 
+        # `-v` makes tail print a "==> path <==" header per file; without it the
+        # two files are concatenated with nothing between them, so it is
+        # impossible to tell which line came from stdout and which from stderr.
         if follow:
-            run([TAIL, "-n", str(lines), "-f", str(out_path), str(err_path)], check=False)
+            run([TAIL, "-n", str(lines), "-v", "-f", str(out_path), str(err_path)], check=False)
         else:
-            run([TAIL, "-n", str(lines), str(out_path)], check=False)
-            run([TAIL, "-n", str(lines), str(err_path)], check=False)
+            run([TAIL, "-n", str(lines), "-v", str(out_path), str(err_path)], check=False)
 
     def exists(self, name: str) -> bool:
         plist_path = self._plist_path(name)

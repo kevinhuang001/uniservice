@@ -109,6 +109,9 @@ class LinuxBackend(Backend):
         if shutil.which(SYSTEMCTL) is None:
             raise UniserviceError("systemctl not found; systemd is required on Linux.")
 
+        # Nothing to clear for a re-created unit: on Linux the output belongs to
+        # journald, which has no per-unit delete, so `logs` reports the whole
+        # journal history for the unit.
         unit_path = self._unit_path(name)
         unit_path.parent.mkdir(parents=True, exist_ok=True)
 

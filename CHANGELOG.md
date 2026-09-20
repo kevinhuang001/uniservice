@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Re-creating a service under the same name starts with an empty log. `create` now removes the
+  previous incarnation's captured output on macOS and Windows, so `uniservice logs` cannot show
+  requests or errors from a service that no longer exists. On Linux the output belongs to journald,
+  which has no per-unit delete, so `logs` still reports that unit's whole journal history.
+
 - `add` rejects a COMMAND whose first word starts with `-` (an extra `--` being the usual cause).
   Every backend runs the command as `<shell> -lc '<cmd>'` and the shell parses that string as a
   script, so `bash -lc '-- python3 -m http.server 8000'` answers `bash: --: invalid option`

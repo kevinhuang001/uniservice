@@ -322,6 +322,20 @@ def test_disable_swallows_reset_failed_output(
     assert runner.commands_matching("reset-failed")
 
 
+def test_clear_files_removes_only_what_exists(tmp_path: Path) -> None:
+    from uniservice_lib.backends.base import clear_files
+
+    first = tmp_path / "a.log"
+    first.write_text("a\n", encoding="utf-8")
+    second = tmp_path / "b.log"
+    keeper = tmp_path / "keep.txt"
+    keeper.write_text("keep\n", encoding="utf-8")
+
+    assert clear_files(first, second) == [first]
+    assert not first.exists()
+    assert keeper.read_text(encoding="utf-8") == "keep\n"
+
+
 # ---------------------------------------------------------------------------
 # status / logs / lifecycle command shapes
 # ---------------------------------------------------------------------------

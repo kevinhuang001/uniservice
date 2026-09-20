@@ -17,6 +17,7 @@ from uniservice_lib.backends.windows import (
     parse_task_xml_enabled,
     service_info_from_task,
     win_build_tr,
+    win_log_dir,
 )
 from uniservice_lib.errors import ServiceNotFoundError, UniserviceError
 from uniservice_lib.scope import Scope
@@ -413,6 +414,29 @@ def test_create_builds_an_onstart_system_task(
     assert "C:/python.exe -m http.server" in action
 
 
+def test_create_clears_the_previous_incarnations_logs(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_runner: Callable[..., FakeRunner],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    fake_runner(windows)
+    log_dir = win_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "demo.out.log").write_text("old stdout\n", encoding="utf-8")
+    (log_dir / "demo.err.log").write_text("old stderr\n", encoding="utf-8")
+    keeper = log_dir / "other.out.log"
+    keeper.write_text("not ours\n", encoding="utf-8")
+
+    backend.create("demo", Path("C:/work"), ["C:/python.exe"])
+
+    assert not (log_dir / "demo.out.log").exists()
+    assert not (log_dir / "demo.err.log").exists()
+    assert keeper.read_text(encoding="utf-8") == "not ours\n"
+
+
 def test_status_uses_the_verbose_listing(
     backend: WindowsBackend,
     monkeypatch: pytest.MonkeyPatch,
@@ -431,18 +455,23 @@ def test_logs_reads_stdout_and_stderr(
     monkeypatch: pytest.MonkeyPatch,
     fake_runner: Callable[..., FakeRunner],
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
     monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
     runner = fake_runner(windows)
 
     backend.logs("demo", lines=15, follow=False)
+    captured = capsys.readouterr()
 
     log_dir = tmp_path / "uniservice" / "logs" / "services"
     scripts = [command[-1] for command in runner.calls]
     assert any(str(log_dir / "demo.out.log") in script and "-Tail 15" in script for script in scripts)
     assert any(str(log_dir / "demo.err.log") in script and "-Tail 15" in script for script in scripts)
     assert all("-Wait" not in script for script in scripts)
+    # Each dump is labelled so the reader can tell stdout from stderr.
+    assert captured.out.index("demo.out.log") < captured.out.index("demo.err.log")
+    assert "==>" in captured.out
 
 
 def test_logs_follow_waits_for_new_lines(

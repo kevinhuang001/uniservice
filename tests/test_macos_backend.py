@@ -370,6 +370,36 @@ def test_create_writes_a_parsable_plist(
     assert data["ProgramArguments"] == ["/bin/bash", "-lc", "/usr/bin/python3 -m http.server 8000"]
 
 
+def test_create_clears_the_previous_incarnations_logs(
+    backend: MacOSBackend,
+    plist_root: Path,
+    fake_runner: Callable[..., FakeRunner],
+) -> None:
+    out_path, err_path = macos_log_paths("demo", Scope(USER))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("old stdout\n", encoding="utf-8")
+    err_path.write_text("old stderr\n", encoding="utf-8")
+    fake_runner(macos)
+
+    backend.create("demo", Path("/tmp"), ["/usr/bin/true"])
+
+    assert not out_path.exists()
+    assert not err_path.exists()
+
+
+def test_create_still_records_where_the_new_logs_go(
+    backend: MacOSBackend,
+    plist_root: Path,
+    fake_runner: Callable[..., FakeRunner],
+) -> None:
+    fake_runner(macos)
+    backend.create("demo", Path("/tmp"), ["/usr/bin/true"])
+    out_path, err_path = macos_log_paths("demo", Scope(USER))
+    data = plistlib.loads((plist_root / "com.uniservice.demo.plist").read_bytes())
+    assert data["StandardOutPath"] == str(out_path)
+    assert data["StandardErrorPath"] == str(err_path)
+
+
 def test_cat_round_trips_the_add_command(
     backend: MacOSBackend,
     plist_root: Path,
@@ -445,10 +475,8 @@ def test_logs_tails_the_recorded_paths(
 
     backend.logs("demo", lines=5, follow=False)
 
-    assert runner.calls == [
-        ["tail", "-n", "5", str(out_path)],
-        ["tail", "-n", "5", str(err_path)],
-    ]
+    # -v labels each file; the two dumps are otherwise indistinguishable.
+    assert runner.calls == [["tail", "-n", "5", "-v", str(out_path), str(err_path)]]
 
 
 def test_logs_follow_tails_both_files_at_once(
@@ -463,7 +491,7 @@ def test_logs_follow_tails_both_files_at_once(
 
     backend.logs("demo", lines=7, follow=True)
 
-    assert runner.calls == [["tail", "-n", "7", "-f", str(out_path), str(err_path)]]
+    assert runner.calls == [["tail", "-n", "7", "-v", "-f", str(out_path), str(err_path)]]
 
 
 def test_logs_prefers_the_paths_stored_in_the_plist(
@@ -481,10 +509,7 @@ def test_logs_prefers_the_paths_stored_in_the_plist(
 
     backend.logs("demo", lines=3, follow=False)
 
-    assert runner.calls == [
-        ["tail", "-n", "3", str(custom_out)],
-        ["tail", "-n", "3", str(custom_err)],
-    ]
+    assert runner.calls == [["tail", "-n", "3", "-v", str(custom_out), str(custom_err)]]
 
 
 def test_enable_stops_at_the_first_successful_domain(
