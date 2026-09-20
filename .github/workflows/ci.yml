@@ -31,18 +31,46 @@ jobs:
         run: ruff format --check --diff .
 
   installers:
-    name: Installer scripts
-    runs-on: ubuntu-latest
+    name: Installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: shellcheck
-        run: shellcheck install-linux.sh install-macos.sh
+        if: runner.os == 'Linux'
+        run: shellcheck install.sh install-linux.sh install-macos.sh
       - name: bash syntax
         run: |
+          bash -n install.sh
           bash -n install-linux.sh
           bash -n install-macos.sh
-      - name: Python syntax of the launcher
-        run: python -m py_compile uniservice
+      - name: Install and uninstall round trip
+        run: |
+          set -euo pipefail
+          prefix="$(mktemp -d)/uniservice"
+          ./install.sh --prefix "$prefix" --no-modify-path
+          "$prefix/bin/uniservice" --version
+          "$prefix/bin/uniservice" list
+          python - "$prefix/lib/uniservice/install.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["version"], data
+          assert len(data["sha256"]) == 64, data
+          assert data["files"], data
+          print("manifest OK:", data["version"], data["sha256"][:12])
+          PY
+          ./install.sh --uninstall --prefix "$prefix"
+          test ! -e "$prefix/bin/uniservice"
+      - name: Compatibility shims forward to install.sh
+        run: |
+          bash install-linux.sh --help | head -3
+          bash install-macos.sh --help | head -3
 
   powershell:
     name: Installer script (PowerShell)
@@ -61,6 +89,56 @@ jobs:
             exit 1
           }
           Write-Host 'install-windows.ps1 parses cleanly'
+      - name: Uninstall with no manifest is handled
+        shell: pwsh
+        run: |
+          ./install-windows.ps1 -Uninstall -Prefix (Join-Path $env:TEMP 'uniservice-does-not-exist')
+          Write-Host 'uninstall without a manifest exits cleanly'
+      - name: Install, run and uninstall the portable layout
+        shell: pwsh
+        run: |
+          # Surface any failure as a check annotation: job logs need repo admin.
+          try {
+            $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-test'
+            ./install-windows.ps1 -Prefix $prefix -NoModifyPath
+            $shim = Join-Path $prefix 'bin\uniservice.cmd'
+            if (-not (Test-Path -LiteralPath $shim)) { throw "missing $shim" }
+            & $shim --version
+            if ($LASTEXITCODE -ne 0) { throw "uniservice.cmd --version failed: $LASTEXITCODE" }
+            $manifest = Join-Path $prefix 'install.json'
+            $data = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+            if (-not $data.version) { throw 'manifest has no version' }
+            Write-Host "installed version: $($data.version)"
+            ./install-windows.ps1 -Uninstall -Prefix $prefix
+            if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
+            Write-Host 'portable install/uninstall round trip OK'
+          } catch {
+            $message = ($_ | Out-String).Replace('%', '%25').Replace("`r`n", '%0A').Replace("`n", '%0A')
+            Write-Host "::error title=windows installer::$message"
+            throw
+          }
+
+  package:
+    name: Package (zipapp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build twice and compare
+        run: |
+          set -euo pipefail
+          python scripts/build_zipapp.py --output build/a/uniservice
+          python scripts/build_zipapp.py --output build/b/uniservice
+          cmp build/a/uniservice build/b/uniservice
+          echo "the zipapp build is reproducible"
+      - name: Smoke test the artifact
+        run: |
+          set -euo pipefail
+          build/a/uniservice --version
+          build/a/uniservice list
+          test -x build/a/uniservice
 
   test:
     name: Test (${{ matrix.os }} / Python ${{ matrix.python-version }})

@@ -3,6 +3,52 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-09-20
+
+A single self-contained install artifact, and an installer that can undo itself.
+
+### Added
+
+- `scripts/build_zipapp.py` builds the release artifact: one self-contained `uniservice`
+  executable (~30 KB, stdlib only). The build is byte-for-byte reproducible, so a published
+  `--sha256` is meaningful.
+- `install.sh`, one installer for macOS and Linux:
+  - `--user` / `--system` / `--prefix DIR` (default: `/usr/local` when root, else `~/.local`)
+  - `--version TAG` to install a specific release, `--sha256 HEX` to verify it
+  - `--from DIR` to build a local checkout without touching the network
+  - `--no-modify-path` to never edit shell startup files
+  - `--uninstall` removes exactly what `<prefix>/lib/uniservice/install.json` records
+  - `--help`
+- `.github/workflows/release.yml`: pushing a `v*` tag publishes the wheel, the sdist, the
+  zipapp, `uniservice.sha256` and `SHA256SUMS` to a GitHub release.
+- `install-windows.ps1` gained `-Prefix`, `-Version`, `-Sha256`, `-NoModifyPath`, `-Pipx` and
+  `-Uninstall`, and records its manifest next to the portable installation.
+- Tests for the artifact and the installer: `tests/test_packaging.py` checks the zipapp
+  contents and reproducibility, `tests/test_install_script.py` runs install → verify →
+  uninstall for real against throwaway prefixes. CI also builds the zipapp twice, runs it,
+  and exercises the installer on Ubuntu and macOS.
+
+### Changed
+
+- **The installation is now a single file.** The old installers copied `uniservice` plus the
+  `uniservice_lib` package directory into a `bin` directory, which could drift and could not
+  be uninstalled. `<prefix>/bin/uniservice` is now self-contained, so copying that one file
+  anywhere is a valid installation.
+- **The default prefix is the shared `/usr/local`, not `~/.local`.** One installation now
+  serves both scopes: `uniservice ...` for per-user services and `sudo uniservice ...` for
+  system services, with no second copy and no dependency on a user's home directory.
+- **`/etc/profile` is never edited.** For a `--user` install the `PATH` line goes into the
+  startup file of the shell you actually use (`~/.zshrc` for zsh, `~/.bashrc` for bash) and is
+  recorded in the manifest so it can be reported on uninstall.
+- The installer no longer installs an unversioned moving target by default: it prefers the
+  newest tagged release and only falls back to the `main` archive, with a warning, when the
+  repository has no releases yet.
+- `install-linux.sh` and `install-macos.sh` are now thin compatibility aliases for
+  `install.sh`, so the documented URLs keep working.
+- Upgrading removes the pre-1.2.0 flat-layout files (`utils.py`, `backend_base.py`,
+  `linux_backend.py`, `mac_backend.py`, `windows_backend.py`, `uniservice_lib/`) from the
+  install directory.
+
 ## [1.1.0] - 2026-09-20
 
 Modular rewrite with a focus on making `uniservice list` correct on all three platforms.

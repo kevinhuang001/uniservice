@@ -14,60 +14,77 @@
 
 ## 安装
 
-安装脚本会做两件事：
+`uniservice` 的发布产物是**一个自包含的可执行文件**（Python zipapp，约 30 KB，除 Python 3.10+
+外无任何依赖）。之所以坚持单文件，是因为它让**一次安装同时服务两种 scope**：同一个
+`/usr/local/bin/uniservice`，你自己运行就是用户级服务，`sudo` 运行就是系统级服务。
 
-1. 检查是否存在 Python 3.10+（没有会提示先安装）
-2. 把 `uniservice` 和它的 `uniservice_lib` 包复制到 PATH 目录，并写入 profile，把该目录加入环境变量
+因此安装器默认装到**共享前缀** `/usr/local`（每个账号的 `PATH` 里本来就有它），没有权限时才退回
+`~/.local`。它不会再改 `/etc/profile`，会把创建的每个文件记录进 manifest，并据此精确卸载。
 
-在代码仓库里直接运行脚本会安装当前这份代码；通过管道运行则安装最新 `main`。
-
-### macOS
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | bash
-```
-
-- 如果你希望系统服务场景下（`sudo uniservice ...`）使用同一个版本，建议用 root 安装：
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | sudo bash
-  ```
-
-- 非 root：安装到 `~/.local/bin/`，并写入 `~/.profile`
-- root：安装到 `/usr/local/bin/`，并写入 `/etc/profile`
-
-两种安装都能管理系统级服务；用户安装通过 `sudo "$(command -v uniservice)" ...`
-进入 root 作用域，原因见 [作用域](#作用域macoslinux)。
-
-### Linux
+### 一行安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | bash
+# macOS / Linux —— 加 sudo 就装到 /usr/local，否则装到 ~/.local
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
 ```
 
-root 安装（系统级）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | sudo bash
-```
-
-规则同 macOS。
-
-### Windows
-
-PowerShell 执行：
+`install-linux.sh` 和 `install-macos.sh` 作为兼容别名保留，老命令继续可用。
 
 ```powershell
+# Windows —— 便携布局，装到 %LOCALAPPDATA%\uniservice\bin
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
 ```
 
-安装到 `%LOCALAPPDATA%\uniservice\bin\`，并更新 PATH（profile + 用户级 PATH）。重开终端生效。
+### 安装器参数
 
-### 从源码安装
+```
+--user / --system      选择"安装"的 scope（默认：root -> /usr/local）
+--prefix DIR           装到 DIR（即 DIR/bin/uniservice）
+--version TAG          安装指定 release，例如 --version v1.2.0
+--sha256 HEX           校验下载产物的 SHA-256
+--from DIR             从本地代码仓库构建，不走网络
+--no-modify-path       不改任何 shell 启动文件，只打印提示
+--uninstall            按 manifest 精确卸载
+```
 
 ```bash
-git clone https://github.com/kevinhuang001/uniservice.git
-cd uniservice
-python -m pip install -e ".[dev]"   # 可选：同时安装 pytest 和 ruff
+./install.sh --version v1.2.0 --sha256 "$(awk '{print $1}' uniservice.sha256)"
+./install.sh --user --prefix "$HOME/opt" --no-modify-path
+./install.sh --uninstall
+```
+
+每次 release 会发布 `uniservice`（zipapp）、wheel、sdist 和 `SHA256SUMS`；zipapp 的构建是**逐字节
+可复现**的，所以固定 `--sha256` 就能得到可验证的安装。仓库还没有 release 时，安装器会退回本地构建
+`main` 分支源码包，并明确告诉你。
+
+### 自己校验
+
+```bash
+curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice
+curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice.sha256
+sha256sum -c uniservice.sha256
+install -m 0755 uniservice /usr/local/bin/uniservice   # 或 ~/.local/bin
+```
+
+### 其它安装方式
+
+```bash
+pipx install uniservice        # 或 uv tool install uniservice
+# 从源码：
+python -m pip install -e ".[dev]"
+python scripts/build_zipapp.py --output dist/uniservice   # 自己构建单文件
+```
+
+### Windows 说明
+
+便携布局会把 `uniservice.pyz` 和 `uniservice.cmd` 装进 `%LOCALAPPDATA%\uniservice\bin`，并写入
+用户 `PATH` 和 PowerShell profile。`-Pipx` 改为用 pipx 安装，`-Uninstall` 撤销便携安装。
+
+重开终端后：
+
+```bash
+uniservice --help
 ```
 
 ## 使用
@@ -81,9 +98,9 @@ python -m pip install -e ".[dev]"   # 可选：同时安装 pytest 和 ruff
 | `uniservice ...` | user（当前用户） | `~/.config/systemd/user/`、`~/Library/LaunchAgents/` |
 | `sudo uniservice ...` | system（整机） | `/etc/systemd/system/`、`/Library/LaunchDaemons/` |
 
-**用户安装同样可以管理系统级服务。** 但 `sudo` 会把 `PATH` 重置成安全的默认值
-（`secure_path`），其中不含 `~/.local/bin`，所以裸写 `sudo uniservice` 会报
-`command not found`。用绝对路径调用即可：
+默认前缀是 `/usr/local`（每个账号的 `PATH` 都包含它），所以那里装的 `sudo uniservice ...` 直接可用。
+只有 `--user` 安装（前缀 `~/.local`）才需要用绝对路径，因为 `sudo` 会把 `PATH` 重置成 sudoers 的
+`secure_path`：
 
 ```bash
 sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.server 8000
@@ -91,19 +108,17 @@ sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.serve
 
 在 `sudo` 下有两处行为差异：
 
-- `--` 后面的命令是用 **root 的 `PATH`** 解析的，`python3` 可能解析到
-  `/usr/bin/python3` 而不是你的 conda/venv；在意的话请传绝对路径；
+- `--` 后面的命令是用 **root 的 `PATH`** 解析的，`python3` 可能解析到 `/usr/bin/python3` 而不是你的
+  conda/venv；在意的话请传绝对路径；
 - 定义文件和日志属于 root（`/root/.uniservice/logs/`）。
 
-如果你就是想直接写 `sudo uniservice`，用 `sudo bash` 装一份系统级，或者把用户安装链接到
-`/usr/local/bin`：
+也可以把用户安装链接进共享前缀：
 
 ```bash
 sudo ln -sf "$(command -v uniservice)" /usr/local/bin/uniservice
 ```
 
-Windows 没有 `sudo`：`uniservice list` 在普通终端即可运行，其它命令需要 **管理员**
-PowerShell/CMD。
+Windows 没有 `sudo`：`uniservice list` 在普通终端即可运行，其它命令需要 **管理员** PowerShell/CMD。
 
 ### add
 
@@ -180,7 +195,7 @@ uniservice cat demo
 ## 代码结构
 
 ```
-uniservice                  可执行入口（很薄的启动器）
+uniservice                  可执行入口（很薄的启动器，也是 zipapp 运行的入口）
 uniservice_lib/
   cli.py                    参数解析与命令分发
   scope.py                  user / system 作用域
@@ -195,7 +210,13 @@ uniservice_lib/
     linux.py                systemd 单元
     macos.py                launchd 任务
     windows.py              计划任务
-tests/                      pytest 测试（单元、端到端、可选集成）
+scripts/build_zipapp.py     构建单文件发布产物
+install.sh                  安装器（前缀、manifest、--uninstall）
+install-linux.sh            为保持文档 URL 可用而保留的兼容别名
+install-macos.sh
+install-windows.ps1         Windows 安装器（便携布局，可选 pipx）
+tests/                      pytest 测试（单元、端到端、安装器、可选集成）
+.github/workflows/          CI（三平台）与发布流程
 ```
 
 所有后端实现同一个 `Backend` 接口：新增平台只需要新增一个模块，并在
@@ -211,37 +232,44 @@ ruff format --check .   # 格式检查
 python -m pytest        # 单元 + 端到端测试
 ```
 
+构建发布产物并对一个临时前缀试跑安装器：
+
+```bash
+python scripts/build_zipapp.py --output dist/uniservice
+./install.sh --prefix /tmp/uniservice-test --no-modify-path
+/tmp/uniservice-test/bin/uniservice --version
+./install.sh --uninstall --prefix /tmp/uniservice-test
+```
+
+zipapp 构建是确定性的，所以 `pytest tests/test_packaging.py tests/test_install_script.py` 可以拿本地
+构建出的产物去比对安装器算出的摘要。
+
 默认测试会 mock 系统命令，因此在三个平台上都能运行。可选的集成测试会真正调用宿主机的服务管理器：
 
 ```bash
 UNISERVICE_RUN_INTEGRATION=1 python -m pytest -m integration -v
 ```
 
-CI 会在 Ubuntu、macOS、Windows 上运行静态检查、shellcheck/PowerShell 检查以及完整测试。
+CI 会在 Ubuntu、macOS、Windows 上运行静态检查、shellcheck/PowerShell 检查、可复现 zipapp 构建以及
+完整测试。推送 `v*` tag 会触发 `.github/workflows/release.yml`，发布 wheel、sdist、zipapp 和
+`SHA256SUMS`。
 
 ## 卸载
 
-卸载包含两部分：
-
-1) 从 PATH 移除 uniservice 命令文件
-2) 删除 uniservice 创建的服务（建议）
-
-macOS/Linux（非 root 安装）：
-
 ```bash
-rm -rf ~/.local/bin/uniservice ~/.local/bin/uniservice_lib
-rm -f  ~/.local/bin/utils.py ~/.local/bin/backend_base.py ~/.local/bin/linux_backend.py ~/.local/bin/mac_backend.py ~/.local/bin/windows_backend.py
+./install.sh --uninstall              # macOS/Linux，按记录的 manifest 卸载
+./install.sh --uninstall --prefix DIR # 装在自定义前缀时
 ```
-
-macOS/Linux（root 安装）：
-
-```bash
-sudo rm -rf /usr/local/bin/uniservice /usr/local/bin/uniservice_lib
-sudo rm -f  /usr/local/bin/utils.py /usr/local/bin/backend_base.py /usr/local/bin/linux_backend.py /usr/local/bin/mac_backend.py /usr/local/bin/windows_backend.py
-```
-
-Windows：
 
 ```powershell
-Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA 'uniservice\bin')
+./install-windows.ps1 -Uninstall      # Windows 便携布局
+pipx uninstall uniservice             # 用 pipx 安装的情况
+```
+
+安装器只会删除记录在 `<prefix>/lib/uniservice/install.json` 里的内容。它**故意保留**写进 shell 启动文件
+的那行 `PATH`，并告诉你该改哪个文件。别忘了先删掉自己创建的服务：
+
+```bash
+uniservice list
+uniservice remove <name>
 ```

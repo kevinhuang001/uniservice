@@ -14,67 +14,83 @@ Requires **Python 3.10+**. No third-party runtime dependencies.
 
 ## Install
 
-Install scripts:
+`uniservice` ships as **one self-contained executable file** (a Python zipapp, ~30 KB, no
+dependencies beyond Python 3.10+). Having a single file is what lets *one* installation serve
+both scopes: the same `/usr/local/bin/uniservice` runs as you (per-user services) and through
+`sudo` (system services).
 
-1. Check that Python 3.10+ exists (otherwise ask you to install it first)
-2. Copy `uniservice` and its `uniservice_lib` package into a PATH directory, and append PATH export into the profile
+The installer therefore defaults to a **shared prefix** (`/usr/local`, which is already on
+`PATH` for every account) and only falls back to `~/.local` when there is no permission to
+do that. It never edits `/etc/profile`, it records everything it created in a manifest, and it
+can undo the installation exactly.
 
-Run the script from a checkout to install those exact files, or pipe it from the web to install the latest `main`.
-
-### macOS
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | bash
-```
-
-- For a system-wide install (so `sudo uniservice ...` uses the same version):
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-macos.sh | sudo bash
-  ```
-
-- non-root: installs to `~/.local/bin/` and writes `~/.profile`
-- root: installs to `/usr/local/bin/` and writes `/etc/profile`
-
-Both installs can manage system services. A user install reaches root's scope with
-`sudo "$(command -v uniservice)" ...` — see [Scope](#scope-macoslinux) for why the
-absolute path is required.
-
-### Linux
+### One-liner
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | bash
+# macOS / Linux — installs to /usr/local when run with sudo, to ~/.local otherwise
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
 ```
 
-For a system-wide install:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-linux.sh | sudo bash
-```
-
-Same behavior as macOS.
-
-### Windows
-
-Run in PowerShell:
+`install-linux.sh` and `install-macos.sh` are kept as compatibility aliases for the same
+installer, so existing commands keep working.
 
 ```powershell
+# Windows — portable layout under %LOCALAPPDATA%\uniservice\bin
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
 ```
 
-It installs to `%LOCALAPPDATA%\uniservice\bin\` and updates PATH (profile + user PATH).
+### Installer options
+
+```
+--user / --system      choose the scope of the *installation* (default: root -> /usr/local)
+--prefix DIR           install under DIR (DIR/bin/uniservice)
+--version TAG          install a specific release, e.g. --version v1.2.0
+--sha256 HEX           verify the downloaded artifact against this digest
+--from DIR             build from a local checkout instead of downloading
+--no-modify-path       never edit shell startup files, only print instructions
+--uninstall            remove a previous installation, using its manifest
+```
+
+```bash
+./install.sh --version v1.2.0 --sha256 "$(cat uniservice.sha256 | awk '{print $1}')"
+./install.sh --user --prefix "$HOME/opt" --no-modify-path
+./install.sh --uninstall
+```
+
+Each release publishes `uniservice` (the zipapp), a wheel, an sdist and `SHA256SUMS`; the
+zipapp build is byte-for-byte reproducible, so pinning a `--sha256` gives a verifiable
+install. When the repository has no release yet the installer falls back to building the
+`main` branch archive locally and says so.
+
+### Verify the checksum yourself
+
+```bash
+curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice
+curl -fsSLO https://github.com/kevinhuang001/uniservice/releases/latest/download/uniservice.sha256
+sha256sum -c uniservice.sha256
+install -m 0755 uniservice /usr/local/bin/uniservice   # or ~/.local/bin
+```
+
+### Alternatives
+
+```bash
+pipx install uniservice        # or: uv tool install uniservice
+# from a checkout:
+python -m pip install -e ".[dev]"
+python scripts/build_zipapp.py --output dist/uniservice   # build the single file yourself
+```
+
+### Windows notes
+
+The portable layout installs `uniservice.pyz` plus a `uniservice.cmd` shim into
+`%LOCALAPPDATA%\uniservice\bin` and adds it to your user `PATH` and PowerShell profile.
+`-Pipx` installs through pipx instead, and `-Uninstall` reverses a portable install.
 
 Reopen the terminal, then:
 
 ```bash
 uniservice --help
-```
-
-### From source
-
-```bash
-git clone https://github.com/kevinhuang001/uniservice.git
-cd uniservice
-python -m pip install -e ".[dev]"   # optional: also installs pytest and ruff
 ```
 
 ## Usage
@@ -88,9 +104,9 @@ The scope is derived from your privileges, not from a flag:
 | `uniservice ...` | user | `~/.config/systemd/user/`, `~/Library/LaunchAgents/` |
 | `sudo uniservice ...` | system | `/etc/systemd/system/`, `/Library/LaunchDaemons/` |
 
-**A user install can manage system services.** `sudo` resets `PATH` to a safe
-default (`secure_path`) that does not contain `~/.local/bin`, so a bare
-`sudo uniservice` fails with `command not found`. Call it by absolute path:
+Because the default install prefix is `/usr/local` (already on every account's `PATH`),
+`sudo uniservice ...` works out of the box there. Only a `--user` install (prefix `~/.local`) needs
+the absolute path, since `sudo` resets `PATH` to the sudoers `secure_path`:
 
 ```bash
 sudo "$(command -v uniservice)" add demo --workdir /tmp -- python3 -m http.server 8000
@@ -103,8 +119,7 @@ Two things change under `sudo`:
   absolute path when that matters;
 - the definition and its logs belong to root (`/root/.uniservice/logs/`).
 
-If you would rather type `sudo uniservice`, install system-wide once with
-`sudo bash`, or link the user install into `/usr/local/bin`:
+Alternatively link the user install into the shared prefix once:
 
 ```bash
 sudo ln -sf "$(command -v uniservice)" /usr/local/bin/uniservice
@@ -189,7 +204,7 @@ Prints an equivalent `uniservice add ...` command for the service.
 ## Project layout
 
 ```
-uniservice                  executable entry point (thin launcher)
+uniservice                  executable entry point (thin launcher, and what the zipapp runs)
 uniservice_lib/
   cli.py                    argument parsing and command dispatch
   scope.py                  user vs. system scope
@@ -204,7 +219,13 @@ uniservice_lib/
     linux.py                systemd units
     macos.py                launchd jobs
     windows.py              Scheduled Tasks
-tests/                      pytest suite (unit, end-to-end, opt-in integration)
+scripts/build_zipapp.py     builds the single-file release artifact
+install.sh                  the installer (prefix, manifest, --uninstall)
+install-linux.sh            compatibility aliases kept for the documented URLs
+install-macos.sh
+install-windows.ps1         Windows installer (portable layout, pipx opt-in)
+tests/                      pytest suite (unit, end-to-end, installer, opt-in integration)
+.github/workflows/          CI (3 platforms) and the release workflow
 ```
 
 Each backend implements the same `Backend` interface, so adding a platform means adding one module and registering it
@@ -220,6 +241,18 @@ ruff format --check .   # formatting
 python -m pytest        # unit + end-to-end tests
 ```
 
+Build the release artifact and try the installer against a throwaway prefix:
+
+```bash
+python scripts/build_zipapp.py --output dist/uniservice
+./install.sh --prefix /tmp/uniservice-test --no-modify-path
+/tmp/uniservice-test/bin/uniservice --version
+./install.sh --uninstall --prefix /tmp/uniservice-test
+```
+
+The zipapp build is deterministic, so `pytest tests/test_packaging.py tests/test_install_script.py`
+can compare a locally built artifact against the digest the installer computes.
+
 The default suite mocks the native tools, so it runs on every platform. Opt-in integration tests drive the real
 service manager of the host:
 
@@ -227,31 +260,27 @@ service manager of the host:
 UNISERVICE_RUN_INTEGRATION=1 python -m pytest -m integration -v
 ```
 
-CI runs lint, shellcheck/PowerShell checks and the full test suite on Ubuntu, macOS and Windows.
+CI runs lint, shellcheck/PowerShell checks, a reproducible-zipapp build and the full test suite on Ubuntu, macOS and
+Windows. Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes the wheel, the sdist, the zipapp
+and `SHA256SUMS` as a GitHub release.
 
 ## Uninstall
 
-Uninstall includes:
-
-1) Remove the `uniservice` command from PATH
-2) Remove services created by uniservice (recommended)
-
-macOS/Linux (non-root install):
-
 ```bash
-rm -rf ~/.local/bin/uniservice ~/.local/bin/uniservice_lib
-rm -f  ~/.local/bin/utils.py ~/.local/bin/backend_base.py ~/.local/bin/linux_backend.py ~/.local/bin/mac_backend.py ~/.local/bin/windows_backend.py
+./install.sh --uninstall              # macOS/Linux, uses the recorded manifest
+./install.sh --uninstall --prefix DIR # if you installed to a custom prefix
 ```
-
-macOS/Linux (root install):
-
-```bash
-sudo rm -rf /usr/local/bin/uniservice /usr/local/bin/uniservice_lib
-sudo rm -f  /usr/local/bin/utils.py /usr/local/bin/backend_base.py /usr/local/bin/linux_backend.py /usr/local/bin/mac_backend.py /usr/local/bin/windows_backend.py
-```
-
-Windows:
 
 ```powershell
-Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA 'uniservice\bin')
+./install-windows.ps1 -Uninstall      # Windows portable layout
+pipx uninstall uniservice             # if you installed with pipx
+```
+
+The installer removes exactly what it recorded in `<prefix>/lib/uniservice/install.json`. It leaves the
+`PATH` line it added to your shell startup file behind on purpose and tells you which file to edit.
+Remember to remove the services you created first:
+
+```bash
+uniservice list
+uniservice remove <name>
 ```
