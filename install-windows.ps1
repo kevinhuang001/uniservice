@@ -192,17 +192,25 @@ function Invoke-Uninstall {
         $removedSomething = $true
       }
     }
-    foreach ($directory in @($data.directories)) {
-      # Only ever delete a directory the manifest names and that really is an
-      # uniservice directory, so a wrong -Prefix cannot remove anything else.
-      if ($directory -and (Test-Path -LiteralPath $directory) -and (Split-Path -Leaf $directory) -eq 'uniservice') {
-        Remove-Item -Recurse -Force -LiteralPath $directory -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $manifestPath -ErrorAction SilentlyContinue
+
+    # Prune directories that are empty now, deepest first, and only inside the
+    # recorded prefix: a wrong -Prefix can therefore never delete real content.
+    if ($data.prefix -and (Test-Path -LiteralPath $data.prefix)) {
+      Get-ChildItem -LiteralPath $data.prefix -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object {
+          if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+          }
+        }
+      if (-not (Get-ChildItem -LiteralPath $data.prefix -Force -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $data.prefix -Force -ErrorAction SilentlyContinue
       }
     }
     if ($data.profile_managed) {
       Write-Note "the PowerShell profile may still contain a PATH line for uniservice: $($data.profile)"
     }
-    Remove-Item -Force -LiteralPath $manifestPath -ErrorAction SilentlyContinue
   }
 
   $pipx = Get-Command pipx -ErrorAction SilentlyContinue
@@ -333,7 +341,6 @@ if (`$env:Path -notlike "*`$uniserviceBin*") { `$env:Path = `$env:Path + ';' + `
       prefix          = $TargetPrefix
       installed_at    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
       files           = @($targetPyz, $shim)
-      directories     = @($TargetPrefix)
       profile         = $profilePath
       profile_managed = [bool]$profilePath
     }

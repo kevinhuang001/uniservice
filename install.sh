@@ -330,7 +330,6 @@ if [[ "$uninstall" -eq 1 ]]; then
 import json
 import os
 import pathlib
-import shutil
 
 manifest = pathlib.Path(os.environ["UNISERVICE_MANIFEST"])
 data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -342,10 +341,25 @@ for entry in data.get("files", []):
         path.unlink()
         removed.append(str(path))
 
-# Only ever delete the manifest's own directory, and only when it really is the
-# uniservice one, so a wrong --prefix cannot remove anything else.
-if manifest.parent.name == "uniservice":
-    shutil.rmtree(manifest.parent, ignore_errors=True)
+manifest.unlink(missing_ok=True)
+
+# Prune directories that are empty now, deepest first, and only inside the
+# recorded prefix: a wrong --prefix can therefore never delete real content.
+prefix = data.get("prefix")
+if isinstance(prefix, str) and prefix:
+    root = pathlib.Path(prefix)
+    if root.is_dir():
+        directories = sorted((item for item in root.rglob("*") if item.is_dir()), key=lambda item: len(item.parts))
+        for directory in reversed(directories):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        try:
+            root.rmdir()
+        except OSError:
+            pass
+
 print(f"Removed {len(removed)} file(s) from the {data.get('version', 'unknown')} installation:")
 for item in removed:
     print(f"  {item}")

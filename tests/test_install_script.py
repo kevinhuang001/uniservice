@@ -90,6 +90,22 @@ def test_install_then_uninstall_round_trip(tmp_path: Path) -> None:
     assert removed.returncode == 0, removed.stderr
     assert not binary.exists()
     assert not manifest_path.exists()
+    # Only empty directories are pruned, so a throwaway prefix disappears
+    # entirely while a prefix holding anything else is left alone.
+    assert not prefix.exists()
+
+
+def test_uninstall_leaves_a_prefix_that_holds_other_files(tmp_path: Path) -> None:
+    prefix = tmp_path / "pfx"
+    assert run_installer("--prefix", str(prefix), "--no-modify-path").returncode == 0
+    keeper = prefix / "keep.txt"
+    keeper.write_text("not ours\n", encoding="utf-8")
+
+    assert run_installer("--uninstall", "--prefix", str(prefix)).returncode == 0
+
+    assert keeper.read_text(encoding="utf-8") == "not ours\n"
+    assert not (prefix / "bin" / "uniservice").exists()
+    assert not (prefix / "lib").exists()
 
 
 def test_installed_artifact_is_a_single_self_contained_file(tmp_path: Path) -> None:
