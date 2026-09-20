@@ -109,7 +109,9 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          sha256sum uniservice uniservice-* ./*.whl ./*.tar.gz > SHA256SUMS
+          # `uniservice-*` already covers the platform binaries, the wheel and the
+          # sdist; listing them again would duplicate their lines.
+          sha256sum uniservice uniservice-* > SHA256SUMS
           cat SHA256SUMS
       - name: Publish the GitHub release
         env:
