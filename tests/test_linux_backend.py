@@ -61,7 +61,10 @@ def test_collect_unit_names_ignores_directories(tmp_path: Path) -> None:
 def test_collect_unit_names_includes_masked_symlinks(tmp_path: Path) -> None:
     """A masked unit is a symlink to /dev/null and must still be listed."""
     write_unit(tmp_path, "kept")
-    (tmp_path / "uniservice-masked.service").symlink_to("/dev/null")
+    try:
+        (tmp_path / "uniservice-masked.service").symlink_to("/dev/null")
+    except (OSError, NotImplementedError):  # pragma: no cover - Windows without symlink rights
+        pytest.skip("creating symlinks requires privileges on this host")
     assert collect_unit_names(tmp_path) == ["kept", "masked"]
 
 
@@ -240,16 +243,18 @@ def test_list_info_uses_system_scope_without_user_flag(
 def test_create_writes_the_expected_unit(
     backend: LinuxBackend,
     unit_root: Path,
+    tmp_path: Path,
     fake_which: Callable[..., None],
     fake_runner: Callable[..., FakeRunner],
 ) -> None:
+    workdir = tmp_path / "work"
     fake_which(linux, "systemctl")
     fake_runner(linux)
 
-    backend.create("demo", Path("/tmp"), ["/usr/bin/python3", "-m", "http.server", "8000"])
+    backend.create("demo", workdir, ["/usr/bin/python3", "-m", "http.server", "8000"])
 
     unit = (unit_root / "uniservice-demo.service").read_text(encoding="utf-8")
-    assert "WorkingDirectory=/tmp" in unit
+    assert f"WorkingDirectory={workdir}" in unit
     assert "ExecStart=/usr/bin/env bash -lc '/usr/bin/python3 -m http.server 8000'" in unit
     assert "WantedBy=default.target" in unit
 
@@ -257,29 +262,33 @@ def test_create_writes_the_expected_unit(
 def test_create_requires_systemctl(
     backend: LinuxBackend,
     unit_root: Path,
+    tmp_path: Path,
     fake_which: Callable[..., None],
 ) -> None:
     fake_which(linux)
     with pytest.raises(UniserviceError):
-        backend.create("demo", Path("/tmp"), ["/usr/bin/true"])
+        backend.create("demo", tmp_path, ["/usr/bin/true"])
 
 
 def test_cat_round_trips_the_add_command(
     backend: LinuxBackend,
     unit_root: Path,
+    tmp_path: Path,
     fake_which: Callable[..., None],
     fake_runner: Callable[..., FakeRunner],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    workdir = tmp_path / "work"
     fake_which(linux, "systemctl")
     fake_runner(linux)
-    backend.create("demo", Path("/tmp"), ["/usr/bin/python3", "-m", "http.server", "8000"])
+    backend.create("demo", workdir, ["/usr/bin/python3", "-m", "http.server", "8000"])
 
     backend.cat("demo")
 
-    assert capsys.readouterr().out.strip() == (
-        "uniservice add demo --workdir /tmp -- /usr/bin/python3 -m http.server 8000"
-    )
+    output = capsys.readouterr().out.strip()
+    assert output.startswith("uniservice add demo --workdir ")
+    assert str(workdir) in output
+    assert output.endswith("-- /usr/bin/python3 -m http.server 8000")
 
 
 def test_cat_rejects_a_missing_service(backend: LinuxBackend, unit_root: Path) -> None:

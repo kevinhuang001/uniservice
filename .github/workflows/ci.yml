@@ -83,4 +83,4 @@ jobs:
       - name: Show the installed version
         run: uniservice --version
       - name: Run the test suite
-        run: python -m pytest -v
+        run: python .github/scripts/run_tests.py -v

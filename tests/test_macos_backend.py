@@ -5,6 +5,7 @@ from __future__ import annotations
 import plistlib
 from collections.abc import Callable
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 import pytest
 
@@ -128,15 +129,16 @@ def test_escape_pgrep_pattern(command: str, expected: str) -> None:
     assert escape_pgrep_pattern(command) == expected
 
 
-def test_render_plist_escapes_xml() -> None:
+def test_render_plist_escapes_xml(tmp_path: Path) -> None:
+    workdir = tmp_path / "<dir>"
     xml = render_plist(
         "com.uniservice.demo",
-        Path("/tmp/<dir>"),
+        workdir,
         "echo '<hi>'",
-        Path("/tmp/out.log"),
-        Path("/tmp/err.log"),
+        tmp_path / "out.log",
+        tmp_path / "err.log",
     )
-    assert "<string>/tmp/&lt;dir&gt;</string>" in xml
+    assert f"<string>{xml_escape(str(workdir))}</string>" in xml
     assert plistlib.loads(xml.encode("utf-8"))["Label"] == "com.uniservice.demo"
 
 
@@ -354,32 +356,37 @@ def test_pgrep_running_without_pgrep_returns_none(
 def test_create_writes_a_parsable_plist(
     backend: MacOSBackend,
     plist_root: Path,
+    tmp_path: Path,
     fake_runner: Callable[..., FakeRunner],
 ) -> None:
+    workdir = tmp_path / "work"
     fake_runner(macos)
 
-    backend.create("demo", Path("/tmp"), ["/usr/bin/python3", "-m", "http.server", "8000"])
+    backend.create("demo", workdir, ["/usr/bin/python3", "-m", "http.server", "8000"])
 
     data = plistlib.loads((plist_root / "com.uniservice.demo.plist").read_bytes())
     assert data["Label"] == "com.uniservice.demo"
-    assert data["WorkingDirectory"] == "/tmp"
+    assert data["WorkingDirectory"] == str(workdir)
     assert data["ProgramArguments"] == ["/bin/bash", "-lc", "/usr/bin/python3 -m http.server 8000"]
 
 
 def test_cat_round_trips_the_add_command(
     backend: MacOSBackend,
     plist_root: Path,
+    tmp_path: Path,
     fake_runner: Callable[..., FakeRunner],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    workdir = tmp_path / "work"
     fake_runner(macos)
-    backend.create("demo", Path("/tmp"), ["/usr/bin/python3", "-m", "http.server", "8000"])
+    backend.create("demo", workdir, ["/usr/bin/python3", "-m", "http.server", "8000"])
 
     backend.cat("demo")
 
-    assert capsys.readouterr().out.strip() == (
-        "uniservice add demo --workdir /tmp -- /usr/bin/python3 -m http.server 8000"
-    )
+    output = capsys.readouterr().out.strip()
+    assert output.startswith("uniservice add demo --workdir ")
+    assert str(workdir) in output
+    assert output.endswith("-- /usr/bin/python3 -m http.server 8000")
 
 
 def test_cat_rejects_a_missing_service(backend: MacOSBackend, plist_root: Path) -> None:
