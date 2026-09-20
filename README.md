@@ -83,7 +83,7 @@ zipapp alternative.
 | `uniservice-linux-x86_64`, `uniservice-linux-aarch64` | standalone binaries |
 | `uniservice-macos-arm64`, `uniservice-macos-x86_64` | standalone binaries |
 | `uniservice-windows-x86_64.exe` | standalone binary |
-| `uniservice-<version>-py3-none-any.whl`, `.tar.gz` | for `pipx` / `pip` |
+| `uniservice-<version>-py3-none-any.whl`, `.tar.gz` | the same code as a Python package |
 | `SHA256SUMS` | digests for everything above |
 
 ### Verify the checksum yourself
@@ -93,27 +93,6 @@ base=https://github.com/kevinhuang001/uniservice/releases/latest/download
 curl -fsSLO "$base/uniservice" && curl -fsSLO "$base/SHA256SUMS"
 grep ' uniservice$' SHA256SUMS | sha256sum -c -
 sudo install -m 0755 uniservice /usr/local/bin/uniservice
-```
-
-### Alternatives
-
-`uniservice` is **not on PyPI yet**, so `pipx install uniservice` does not work. Install from the
-repository or from a release wheel instead:
-
-```bash
-pipx install "git+https://github.com/kevinhuang001/uniservice.git"
-uv tool install "git+https://github.com/kevinhuang001/uniservice.git"
-
-# or a specific release wheel (the URL carries the version)
-pipx install https://github.com/kevinhuang001/uniservice/releases/download/v1.3.0/uniservice-1.3.0-py3-none-any.whl
-```
-
-From a checkout:
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pip install -e ".[build]" && python scripts/build_binary.py   # build the binary
-python scripts/build_zipapp.py --output dist/uniservice                 # build the zipapp
 ```
 
 ### Windows notes
@@ -303,7 +282,6 @@ sudo ./install.sh --uninstall              # macOS/Linux, uses the recorded mani
 
 ```powershell
 ./install-windows.ps1 -Uninstall      # Windows portable layout
-pipx uninstall uniservice             # if you installed with pipx
 ```
 
 The installer removes exactly what it recorded in `/usr/local/lib/uniservice/install.json` and

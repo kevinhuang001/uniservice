@@ -79,7 +79,7 @@ zipapp 的构建是**逐字节可复现**的，所以固定 `--sha256` 就能得
 | `uniservice-linux-x86_64`、`uniservice-linux-aarch64` | 独立二进制 |
 | `uniservice-macos-arm64`、`uniservice-macos-x86_64` | 独立二进制 |
 | `uniservice-windows-x86_64.exe` | 独立二进制 |
-| `uniservice-<version>-py3-none-any.whl`、`.tar.gz` | 给 `pipx` / `pip` |
+| `uniservice-<version>-py3-none-any.whl`、`.tar.gz` | 同一份代码的 Python 包 |
 | `SHA256SUMS` | 以上全部的摘要 |
 
 ### 自己校验
@@ -89,27 +89,6 @@ base=https://github.com/kevinhuang001/uniservice/releases/latest/download
 curl -fsSLO "$base/uniservice" && curl -fsSLO "$base/SHA256SUMS"
 grep ' uniservice$' SHA256SUMS | sha256sum -c -
 sudo install -m 0755 uniservice /usr/local/bin/uniservice
-```
-
-### 其它安装方式
-
-`uniservice` **还没有发布到 PyPI**，所以 `pipx install uniservice` 是跑不通的。请从仓库或 release
-里的 wheel 安装：
-
-```bash
-pipx install "git+https://github.com/kevinhuang001/uniservice.git"
-uv tool install "git+https://github.com/kevinhuang001/uniservice.git"
-
-# 或指定 release 的 wheel（URL 里带版本号）
-pipx install https://github.com/kevinhuang001/uniservice/releases/download/v1.3.0/uniservice-1.3.0-py3-none-any.whl
-```
-
-从源码：
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pip install -e ".[build]" && python scripts/build_binary.py   # 构建独立二进制
-python scripts/build_zipapp.py --output dist/uniservice                 # 构建 zipapp
 ```
 
 ### Windows 说明
@@ -292,7 +271,6 @@ sudo ./install.sh --uninstall          # macOS/Linux，按记录的 manifest 卸
 
 ```powershell
 ./install-windows.ps1 -Uninstall      # Windows 便携布局
-pipx uninstall uniservice             # 用 pipx 安装的情况
 ```
 
 安装器只删除记录在 `/usr/local/lib/uniservice/manifest` 里的内容，并把因此变空的目录清理掉；它从未
