@@ -297,14 +297,6 @@ function Invoke-PortableInstall {
     Set-Content -LiteralPath $shim -Value $shimContent -Encoding ASCII
     Write-Step "Installed $shim (version $installedVersion)"
 
-    # Remove the pre-1.2.0 layout, which copied the program and the package.
-    foreach ($legacy in @('uniservice', 'utils.py', 'backend_base.py', 'linux_backend.py', 'mac_backend.py', 'windows_backend.py')) {
-      $legacyPath = Join-Path $binDir $legacy
-      if (Test-Path -LiteralPath $legacyPath) { Remove-Item -Force -LiteralPath $legacyPath }
-    }
-    $legacyPackage = Join-Path $binDir $PackageName
-    if (Test-Path -LiteralPath $legacyPackage) { Remove-Item -Recurse -Force -LiteralPath $legacyPackage }
-
     $profilePath = $null
     if (-not $NoModifyPath -and -not $Prefix) {
       $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')

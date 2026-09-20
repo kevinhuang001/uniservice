@@ -50,7 +50,7 @@ SYSTEMD_DISABLED_STATES = frozenset(
 
 #: ``systemctl is-active`` results that mean "the unit is up".
 #: ``activating``/``reloading`` are transient but the unit is being served, so
-#: reporting "no" (the pre-1.1.0 behaviour) was wrong.
+#: they count as running.
 SYSTEMD_ACTIVE_STATES = frozenset({"active", "activating", "reloading"})
 
 #: ``systemctl is-active`` results that mean "the unit is not up".

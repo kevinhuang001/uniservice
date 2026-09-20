@@ -22,10 +22,6 @@ PACKAGE_NAME="uniservice_lib"
 MANIFEST_NAME="install.json"
 DEFAULT_INTERPRETER="/usr/bin/env python3"
 
-# Files created by the pre-1.2.0 installers, which copied the Python package
-# next to the launcher.
-LEGACY_FILES="utils.py backend_base.py linux_backend.py mac_backend.py windows_backend.py"
-
 prefix=""
 mode=""
 version=""
@@ -427,23 +423,6 @@ cp "$artifact" "$staged_binary"
 chmod 0755 "$staged_binary"
 mv -f "$staged_binary" "$bin_dir/$PROGRAM_NAME"
 log "Installed $bin_dir/$PROGRAM_NAME (version $installed_version)"
-
-# Migrate away from the pre-1.2.0 layout, which copied the package next to the
-# launcher instead of shipping one self-contained file.
-legacy_removed=0
-for legacy in $LEGACY_FILES; do
-  if [[ -e "$bin_dir/$legacy" ]]; then
-    rm -f "$bin_dir/$legacy"
-    legacy_removed=1
-  fi
-done
-if [[ -d "$bin_dir/$PACKAGE_NAME" ]]; then
-  rm -rf "${bin_dir:?}/$PACKAGE_NAME"
-  legacy_removed=1
-fi
-if [[ "$legacy_removed" -eq 1 ]]; then
-  log "Removed the pre-1.2.0 package files from $bin_dir"
-fi
 
 # ---------------------------------------------------------------------------
 # PATH

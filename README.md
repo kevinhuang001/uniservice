@@ -32,9 +32,6 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
 ```
 
-`install-linux.sh` and `install-macos.sh` are kept as compatibility aliases for the same
-installer, so existing commands keep working.
-
 ```powershell
 # Windows — portable layout under %LOCALAPPDATA%\uniservice\bin
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
@@ -221,8 +218,6 @@ uniservice_lib/
     windows.py              Scheduled Tasks
 scripts/build_zipapp.py     builds the single-file release artifact
 install.sh                  the installer (prefix, manifest, --uninstall)
-install-linux.sh            compatibility aliases kept for the documented URLs
-install-macos.sh
 install-windows.ps1         Windows installer (portable layout, pipx opt-in)
 tests/                      pytest suite (unit, end-to-end, installer, opt-in integration)
 .github/workflows/          CI (3 platforms) and the release workflow

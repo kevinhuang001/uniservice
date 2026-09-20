@@ -44,12 +44,9 @@ jobs:
           python-version: "3.12"
       - name: shellcheck
         if: runner.os == 'Linux'
-        run: shellcheck install.sh install-linux.sh install-macos.sh
+        run: shellcheck install.sh
       - name: bash syntax
-        run: |
-          bash -n install.sh
-          bash -n install-linux.sh
-          bash -n install-macos.sh
+        run: bash -n install.sh
       - name: Install and uninstall round trip
         run: |
           set -euo pipefail
@@ -67,10 +64,6 @@ jobs:
           PY
           ./install.sh --uninstall --prefix "$prefix"
           test ! -e "$prefix/bin/uniservice"
-      - name: Compatibility shims forward to install.sh
-        run: |
-          bash install-linux.sh --help | head -3
-          bash install-macos.sh --help | head -3
 
   powershell:
     name: Installer script (PowerShell)

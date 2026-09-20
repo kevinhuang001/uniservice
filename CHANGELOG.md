@@ -43,11 +43,9 @@ A single self-contained install artifact, and an installer that can undo itself.
 - The installer no longer installs an unversioned moving target by default: it prefers the
   newest tagged release and only falls back to the `main` archive, with a warning, when the
   repository has no releases yet.
-- `install-linux.sh` and `install-macos.sh` are now thin compatibility aliases for
-  `install.sh`, so the documented URLs keep working.
-- Upgrading removes the pre-1.2.0 flat-layout files (`utils.py`, `backend_base.py`,
-  `linux_backend.py`, `mac_backend.py`, `windows_backend.py`, `uniservice_lib/`) from the
-  install directory.
+- **No compatibility with the pre-1.2.0 installer.** `install-linux.sh` and `install-macos.sh`
+  are gone (use `install.sh`) and the installers no longer look for or remove the old
+  flat-layout files. Install once with the new installer and remove the old files yourself.
 
 ## [1.1.0] - 2026-09-20
 

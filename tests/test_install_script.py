@@ -203,16 +203,3 @@ def test_zsh_users_get_a_zshrc_hint(tmp_path: Path) -> None:
     completed = run_installer("--user", env={"HOME": str(home), "SHELL": "/bin/zsh"})
     assert completed.returncode == 0, completed.stderr
     assert 'export PATH="$HOME/.local/bin:$PATH"' in zshrc.read_text(encoding="utf-8")
-
-
-def test_compatibility_shims_forward_to_install_sh() -> None:
-    for shim in ("install-linux.sh", "install-macos.sh"):
-        completed = subprocess.run(
-            ["bash", str(REPO_ROOT / shim), "--help"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-        assert completed.returncode == 0, completed.stderr
-        assert "Usage: install.sh" in completed.stdout

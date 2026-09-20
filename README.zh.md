@@ -29,8 +29,6 @@ curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/insta
 curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh | sudo bash
 ```
 
-`install-linux.sh` 和 `install-macos.sh` 作为兼容别名保留，老命令继续可用。
-
 ```powershell
 # Windows —— 便携布局，装到 %LOCALAPPDATA%\uniservice\bin
 iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install-windows.ps1 | iex
@@ -212,8 +210,6 @@ uniservice_lib/
     windows.py              计划任务
 scripts/build_zipapp.py     构建单文件发布产物
 install.sh                  安装器（前缀、manifest、--uninstall）
-install-linux.sh            为保持文档 URL 可用而保留的兼容别名
-install-macos.sh
 install-windows.ps1         Windows 安装器（便携布局，可选 pipx）
 tests/                      pytest 测试（单元、端到端、安装器、可选集成）
 .github/workflows/          CI（三平台）与发布流程
