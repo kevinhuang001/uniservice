@@ -85,30 +85,36 @@ jobs:
             (Join-Path $PWD 'install-windows.ps1'), [ref]$null, [ref]$errors
           ) | Out-Null
           if ($errors.Count -gt 0) {
-            $errors | Format-List
+            $detail = ($errors | ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Message)" }) -join "`n"
+            $encoded = $detail.Replace('%', '%25').Replace("`r`n", '%0A').Replace("`n", '%0A')
+            Write-Host "::error title=install-windows.ps1 syntax::$encoded"
             exit 1
           }
           Write-Host 'install-windows.ps1 parses cleanly'
-      - name: Uninstall with no manifest is handled
-        shell: pwsh
-        run: |
-          ./install-windows.ps1 -Uninstall -Prefix (Join-Path $env:TEMP 'uniservice-does-not-exist')
-          Write-Host 'uninstall without a manifest exits cleanly'
-      - name: Install, run and uninstall the portable layout
+      - name: Exercise the installer
         shell: pwsh
         run: |
           # Surface any failure as a check annotation: job logs need repo admin.
           try {
+            Write-Host '--- uninstall with no manifest'
+            ./install-windows.ps1 -Uninstall -Prefix (Join-Path $env:RUNNER_TEMP 'uniservice-none')
+
+            Write-Host '--- portable install'
             $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-test'
             ./install-windows.ps1 -Prefix $prefix -NoModifyPath
+
             $shim = Join-Path $prefix 'bin\uniservice.cmd'
             if (-not (Test-Path -LiteralPath $shim)) { throw "missing $shim" }
+
             & $shim --version
-            if ($LASTEXITCODE -ne 0) { throw "uniservice.cmd --version failed: $LASTEXITCODE" }
+            if ($LASTEXITCODE -ne 0) { throw "uniservice.cmd --version returned $LASTEXITCODE" }
+
             $manifest = Join-Path $prefix 'install.json'
             $data = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
-            if (-not $data.version) { throw 'manifest has no version' }
-            Write-Host "installed version: $($data.version)"
+            if (-not $data.version) { throw 'the manifest has no version' }
+            Write-Host "manifest version: $($data.version), files: $($data.files.Count)"
+
+            Write-Host '--- uninstall'
             ./install-windows.ps1 -Uninstall -Prefix $prefix
             if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
             Write-Host 'portable install/uninstall round trip OK'
