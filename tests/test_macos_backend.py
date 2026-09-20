@@ -540,21 +540,6 @@ def test_start_bootstraps_then_kickstarts(
     assert runner.commands_matching("launchctl", "kickstart", "-k", f"{DOMAIN}/com.uniservice.demo")
 
 
-def test_start_falls_back_to_the_legacy_loader(
-    backend: MacOSBackend,
-    plist_root: Path,
-    fake_runner: Callable[..., FakeRunner],
-) -> None:
-    write_plist(plist_root, "demo")
-    runner = fake_runner(macos)
-    runner.add_command("launchctl", "bootstrap", returncode=5, stderr="Input/output error")
-
-    backend.start("demo")
-
-    assert runner.commands_matching("launchctl", "load", "-w")
-    assert runner.commands_matching("launchctl", "start", "com.uniservice.demo")
-
-
 def test_start_reports_the_bootstrap_error_when_everything_fails(
     backend: MacOSBackend,
     plist_root: Path,
@@ -580,7 +565,6 @@ def test_stop_kills_and_boots_out(
     assert runner.commands_matching("launchctl", "kill", "SIGTERM", f"{DOMAIN}/com.uniservice.demo")
     assert runner.commands_matching("launchctl", "stop", f"{DOMAIN}/com.uniservice.demo")
     assert runner.commands_matching("launchctl", "bootout", DOMAIN, str(plist_path))
-    assert runner.commands_matching("launchctl", "unload", "-w", str(plist_path))
 
 
 def test_remove_deletes_the_plist(

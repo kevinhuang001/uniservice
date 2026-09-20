@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- macOS: dropped the `launchctl load -w` / `unload -w` fallback from `start()` and `stop()`. Those
+  are the pre-10.10 launchctl subcommands, and uniservice now only uses the supported interface:
+  `launchctl bootstrap` to register and `launchctl bootout` to unregister. `start` reports the
+  `bootstrap` error directly instead of silently retrying through the deprecated path.
+
 ## [1.2.1] - 2026-09-20
 
 ### Changed

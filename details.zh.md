@@ -129,7 +129,6 @@ macOS 上用 launchd 的 plist（LaunchAgents/LaunchDaemons）描述 job，并�
   - `KeepAlive=true`
 - 注册并启动：
   - `launchctl bootstrap <domain> <plist>`
-  - 若 `bootstrap` 返回 5（Input/output error），会回退尝试 `launchctl load -w <plist>`（兼容一些环境差异）
   - `launchctl enable <domain>/<label>`
   - `launchctl kickstart -k <domain>/<label>`
 - domain 选择：
@@ -153,7 +152,7 @@ macOS 上用 launchd 的 plist（LaunchAgents/LaunchDaemons）描述 job，并�
 
 - 停止并卸载 job，避免 `KeepAlive=true` 立刻拉起：
   - `launchctl stop/kill ...`
-  - `launchctl bootout ...`（必要时配合 legacy unload）
+  - `launchctl bootout <domain> <plist>`
 
 ### list
 

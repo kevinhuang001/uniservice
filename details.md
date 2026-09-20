@@ -137,7 +137,6 @@ macOS uses launchd plists (LaunchAgents/LaunchDaemons) and `launchctl` to manage
   - `KeepAlive=true`
 - Register and start:
   - `launchctl bootstrap <domain> <plist>`
-  - If `bootstrap` fails with exit code 5 (Input/output error), fall back to `launchctl load -w <plist>` for compatibility.
   - `launchctl enable <domain>/<label>`
   - `launchctl kickstart -k <domain>/<label>`
 - Domain selection:
@@ -163,7 +162,7 @@ Note: because the plist contains `RunAtLoad=true`, some load/register operations
 
 - Stop/terminate and unload the job to prevent `KeepAlive=true` from instantly restarting it:
   - `launchctl stop/kill ...`
-  - `launchctl bootout ...` (and legacy unload when needed)
+  - `launchctl bootout <domain> <plist>`
 
 ### list
 

@@ -242,25 +242,6 @@ class MacOSBackend(Backend):
             last_error = output.strip() or f"launchctl bootstrap failed with exit code {completed.returncode}"
         raise UniserviceError(last_error)
 
-    def _load_legacy(self, plist_path: Path) -> bool:
-        completed = run([LAUNCHCTL, "load", "-w", str(plist_path)], check=False, capture=True)
-        logger.info(
-            "launchctl load -w rc=%s out=%r err=%r",
-            completed.returncode,
-            (completed.stdout or "").strip(),
-            (completed.stderr or "").strip(),
-        )
-        return completed.returncode == 0
-
-    def _unload_legacy(self, plist_path: Path) -> None:
-        completed = run([LAUNCHCTL, "unload", "-w", str(plist_path)], check=False, capture=True)
-        logger.info(
-            "launchctl unload -w rc=%s out=%r err=%r",
-            completed.returncode,
-            (completed.stdout or "").strip(),
-            (completed.stderr or "").strip(),
-        )
-
     def create(self, name: str, workdir: Path, command_parts: list[str]) -> None:
         logger.info("mac create name=%s workdir=%s", name, workdir)
         plist_path = self._plist_path(name)
@@ -387,21 +368,9 @@ class MacOSBackend(Backend):
             raise ServiceNotFoundError(name)
 
         label = self._label(name)
-        bootstrap_error: UniserviceError | None = None
-        try:
-            domain = self._bootstrap(label, plist_path)
-            run([LAUNCHCTL, "enable", f"{domain}/{label}"], check=False)
-            run([LAUNCHCTL, "kickstart", "-k", f"{domain}/{label}"], check=False)
-            return
-        except UniserviceError as exc:
-            bootstrap_error = exc
-            logger.info("launchctl bootstrap failed for %s: %s", label, exc)
-
-        if self._load_legacy(plist_path):
-            run([LAUNCHCTL, "start", label], check=False, quiet=True)
-            return
-        if bootstrap_error is not None:
-            raise bootstrap_error
+        domain = self._bootstrap(label, plist_path)
+        run([LAUNCHCTL, "enable", f"{domain}/{label}"], check=False)
+        run([LAUNCHCTL, "kickstart", "-k", f"{domain}/{label}"], check=False)
 
     def stop(self, name: str) -> None:
         logger.info("mac stop name=%s", name)
@@ -418,7 +387,6 @@ class MacOSBackend(Backend):
         run([LAUNCHCTL, "stop", label], check=False, quiet=True)
 
         self._bootout_all(plist_path)
-        self._unload_legacy(plist_path)
 
     def remove(self, name: str) -> None:
         logger.info("mac remove name=%s", name)
