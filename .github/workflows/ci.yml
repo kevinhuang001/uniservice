@@ -102,6 +102,8 @@ jobs:
             $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-binary'
             $artifact = (Get-ChildItem dist\uniservice-*.exe).FullName
             ./install-windows.ps1 -From $artifact -Prefix $prefix -NoModifyPath
+            $manifest = Join-Path $prefix 'lib\uniservice\manifest'
+            if (-not (Test-Path -LiteralPath $manifest)) { throw "the manifest is not at $manifest" }
             $exe = Join-Path $prefix 'bin\uniservice.exe'
             & $exe --version
             if ($LASTEXITCODE -ne 0) { throw "$exe --version exited $LASTEXITCODE" }
@@ -135,6 +137,9 @@ jobs:
             $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-zipapp'
             python scripts/build_zipapp.py --output build/uniservice --quiet
             ./install-windows.ps1 -From "$PWD/build/uniservice" -Prefix $prefix -NoModifyPath
+            if (-not (Test-Path -LiteralPath (Join-Path $prefix 'lib\uniservice\manifest'))) {
+              throw 'the manifest is not under lib\uniservice'
+            }
             $shim = Join-Path $prefix 'bin\uniservice.cmd'
             & $shim --version
             $output = & $shim uninstall 2>&1 | Out-String

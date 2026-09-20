@@ -142,7 +142,9 @@ function Test-PythonAvailable {
 
 function Get-ManifestPath {
   param([string]$TargetPrefix)
-  return (Join-Path $TargetPrefix $ManifestName)
+  # Same layout as install.sh: <prefix>/lib/uniservice/manifest, so that
+  # `uniservice uninstall` finds it from the running command on every platform.
+  return (Join-Path (Join-Path (Join-Path $TargetPrefix 'lib') $ProgramName) $ManifestName)
 }
 
 function Read-Manifest {
