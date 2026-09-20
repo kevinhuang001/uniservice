@@ -93,9 +93,20 @@ sudo install -m 0755 uniservice /usr/local/bin/uniservice
 
 ### 其它安装方式
 
+`uniservice` **还没有发布到 PyPI**，所以 `pipx install uniservice` 是跑不通的。请从仓库或 release
+里的 wheel 安装：
+
 ```bash
-pipx install uniservice        # 或 uv tool install uniservice
-# 从源码：
+pipx install "git+https://github.com/kevinhuang001/uniservice.git"
+uv tool install "git+https://github.com/kevinhuang001/uniservice.git"
+
+# 或指定 release 的 wheel（URL 里带版本号）
+pipx install https://github.com/kevinhuang001/uniservice/releases/download/v1.3.0/uniservice-1.3.0-py3-none-any.whl
+```
+
+从源码：
+
+```bash
 python -m pip install -e ".[dev]"
 python -m pip install -e ".[build]" && python scripts/build_binary.py   # 构建独立二进制
 python scripts/build_zipapp.py --output dist/uniservice                 # 构建 zipapp

@@ -97,9 +97,20 @@ sudo install -m 0755 uniservice /usr/local/bin/uniservice
 
 ### Alternatives
 
+`uniservice` is **not on PyPI yet**, so `pipx install uniservice` does not work. Install from the
+repository or from a release wheel instead:
+
 ```bash
-pipx install uniservice        # or: uv tool install uniservice
-# from a checkout:
+pipx install "git+https://github.com/kevinhuang001/uniservice.git"
+uv tool install "git+https://github.com/kevinhuang001/uniservice.git"
+
+# or a specific release wheel (the URL carries the version)
+pipx install https://github.com/kevinhuang001/uniservice/releases/download/v1.3.0/uniservice-1.3.0-py3-none-any.whl
+```
+
+From a checkout:
+
+```bash
 python -m pip install -e ".[dev]"
 python -m pip install -e ".[build]" && python scripts/build_binary.py   # build the binary
 python scripts/build_zipapp.py --output dist/uniservice                 # build the zipapp
