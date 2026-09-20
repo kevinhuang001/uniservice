@@ -217,6 +217,8 @@ function Invoke-Uninstall {
   if ($pipx) {
     & pipx uninstall $ProgramName 2>$null
     if ($LASTEXITCODE -eq 0) { $removedSomething = $true }
+    # A "package not installed" failure must not leak into the script's exit code.
+    $global:LASTEXITCODE = 0
   }
 
   if ($removedSomething) {
@@ -376,3 +378,6 @@ function Invoke-Main {
 }
 
 Invoke-Main
+# The script reports failures by throwing, so a clean run must exit 0 even if
+# the last native command it ran reported a non-zero status.
+$global:LASTEXITCODE = 0

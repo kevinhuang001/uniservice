@@ -86,43 +86,63 @@ jobs:
           ) | Out-Null
           if ($errors.Count -gt 0) {
             $detail = ($errors | ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Message)" }) -join "`n"
-            $encoded = $detail.Replace('%', '%25').Replace("`r`n", '%0A').Replace("`n", '%0A')
-            Write-Host "::error title=install-windows.ps1 syntax::$encoded"
+            $encoded = $detail.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            [Console]::WriteLine("::error title=install-windows.ps1 syntax::$encoded")
+            [Console]::Out.Flush()
             exit 1
           }
           Write-Host 'install-windows.ps1 parses cleanly'
       - name: Exercise the installer
         shell: pwsh
         run: |
-          # Surface any failure as a check annotation: job logs need repo admin.
-          try {
-            Write-Host '--- uninstall with no manifest'
-            ./install-windows.ps1 -Uninstall -Prefix (Join-Path $env:RUNNER_TEMP 'uniservice-none')
+          $PSNativeCommandUseErrorActionPreference = $false
 
-            Write-Host '--- portable install'
+          # Job logs need repository admin rights to download, so failures are
+          # reported through check annotations instead.  [Console]::WriteLine is
+          # used because Write-Host output is not parsed as a workflow command.
+          function Write-Annotation {
+            param([string]$Title, [string]$Detail)
+            $encoded = $Detail.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            [Console]::WriteLine("::error title=$Title::$encoded")
+            [Console]::Out.Flush()
+          }
+
+          function Invoke-InstallerScript {
+            param([string[]]$InstallerArgs)
+            Write-Host ">>> install-windows.ps1 $($InstallerArgs -join ' ')"
+            $output = & pwsh -NoProfile -File ./install-windows.ps1 @InstallerArgs 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $output
+            if ($code -ne 0) {
+              Write-Annotation -Title 'install-windows.ps1' -Detail "exit code $code`n$output"
+              throw "install-windows.ps1 exited $code"
+            }
+          }
+
+          try {
+            Invoke-InstallerScript @('-Uninstall', '-Prefix', (Join-Path $env:RUNNER_TEMP 'uniservice-none')) | Out-Null
+
             $prefix = Join-Path $env:RUNNER_TEMP 'uniservice-test'
-            ./install-windows.ps1 -Prefix $prefix -NoModifyPath
+            Invoke-InstallerScript @('-Prefix', $prefix, '-NoModifyPath') | Out-Null
 
             $shim = Join-Path $prefix 'bin\uniservice.cmd'
             if (-not (Test-Path -LiteralPath $shim)) { throw "missing $shim" }
-
             & $shim --version
             if ($LASTEXITCODE -ne 0) { throw "uniservice.cmd --version returned $LASTEXITCODE" }
 
-            $manifest = Join-Path $prefix 'install.json'
-            $data = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+            $data = Get-Content -LiteralPath (Join-Path $prefix 'install.json') -Raw | ConvertFrom-Json
             if (-not $data.version) { throw 'the manifest has no version' }
             Write-Host "manifest version: $($data.version), files: $($data.files.Count)"
 
-            Write-Host '--- uninstall'
-            ./install-windows.ps1 -Uninstall -Prefix $prefix
+            Invoke-InstallerScript @('-Uninstall', '-Prefix', $prefix) | Out-Null
             if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind" }
             Write-Host 'portable install/uninstall round trip OK'
           } catch {
-            $message = ($_ | Out-String).Replace('%', '%25').Replace("`r`n", '%0A').Replace("`n", '%0A')
-            Write-Host "::error title=windows installer::$message"
+            Write-Annotation -Title 'windows installer' -Detail ($_ | Out-String)
             throw
           }
+
+          exit 0
 
   package:
     name: Package (zipapp)
