@@ -36,6 +36,11 @@ __all__ = [
 MANIFEST_NAME = "manifest"
 LIB_DIR_NAME = "uniservice"
 
+#: On Windows these are read line by line while they run, so removing them from
+#: inside the command they started makes cmd.exe complain ("The batch file cannot
+#: be found") for every remaining line.
+WINDOWS_DEFERRED_SUFFIXES = frozenset({".cmd", ".bat"})
+
 
 @dataclass(frozen=True)
 class Installation:
@@ -145,7 +150,7 @@ def remove_installation(
         if dry_run:
             removed.append(resolved)
             continue
-        if os.name == "nt" and _normcase(resolved) in running:
+        if os.name == "nt" and (_normcase(resolved) in running or resolved.suffix.lower() in WINDOWS_DEFERRED_SUFFIXES):
             deferred.append(resolved)
             continue
         _unlink(resolved)

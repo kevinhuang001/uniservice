@@ -142,11 +142,16 @@ jobs:
             }
             $shim = Join-Path $prefix 'bin\uniservice.cmd'
             & $shim --version
+            # The .cmd shim is being read by cmd.exe and the .pyz is the script
+            # `py` is running, so both are handed to the helper; what matters is
+            # that the prefix is gone once it has run.
             $output = & $shim uninstall 2>&1 | Out-String
             Write-Host $output
-            if ($output -match 'a moment after this command exits') {
-              throw "the zipapp should not need a deferred delete:`n$output"
+            if ($output -notmatch 'a moment after this command exits') {
+              throw "expected the deferred message, got:`n$output"
             }
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Test-Path -LiteralPath $prefix) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
             if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind`n$output" }
             Write-Host 'portable zipapp self-uninstall OK'
           } catch {

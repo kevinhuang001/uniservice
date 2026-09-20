@@ -126,9 +126,15 @@ def test_paths_outside_the_prefix_are_ignored(tmp_path: Path) -> None:
     assert outsider.read_text(encoding="utf-8") == "do not delete\n"
 
 
-@pytest.mark.skipif(os.name != "nt", reason="only Windows refuses to delete a running image")
-def test_running_executable_is_deferred_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only removal rules")
+def test_running_image_and_batch_shim_are_deferred_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     installation = make_installation(tmp_path)
+    shim = installation.prefix / "bin" / "uniservice.cmd"
+    shim.write_text("@echo off\n", encoding="utf-8")
+    # Record the shim too, as the zipapp install does.
+    fields = dict(installation.fields) | {"shim": str(shim)}
+    installation = Installation(installation.prefix, installation.command, installation.manifest, fields)
+
     scheduled: list[Path] = []
     monkeypatch.setattr("uniservice_lib.installation.running_commands", lambda: [installation.command])
     monkeypatch.setattr(
@@ -139,8 +145,8 @@ def test_running_executable_is_deferred_on_windows(tmp_path: Path, monkeypatch: 
     removed, deferred = remove_installation(installation)
 
     assert removed == []
-    assert deferred == [installation.command]
-    assert scheduled == [installation.command]
+    assert deferred == [shim, installation.command]
+    assert scheduled == [shim, installation.command]
     assert installation.command.exists()  # still there until the helper runs
     assert not installation.manifest.exists()
 
