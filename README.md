@@ -66,28 +66,33 @@ The same `UNISERVICE_BINARY=1` environment variable works for `install.sh`.
 
 ### PyPI
 
-`uniservice` is published on [PyPI](https://pypi.org/project/uniservice/) as well, so any Python
-package frontend can install it:
+`uniservice` is published on [PyPI](https://pypi.org/project/uniservice/) as well. Install it
+**globally**, because that is what puts the command where `sudo` can see it:
 
 ```bash
-pipx install uniservice        # or: uv tool install uniservice
-uniservice --help
+sudo pipx install --global uniservice    # venv in /opt/pipx, command in /usr/local/bin
+uniservice --help                        # ... and `sudo uniservice ...` works too
 ```
 
-This route is a normal Python entry point, so where the command lands depends on the frontend —
-and that decides whether `sudo uniservice ...` can find it:
+`pipx --global` writes to `/opt/pipx` and `/usr/local/bin`, so it lands exactly where the installer
+does. It does need pipx itself to be installed system-wide (apt, brew, or the standalone installer);
+pipx installed with `pip install --user` cannot be run under `sudo`.
+
+A per-user install still works, but the command then lives in your home directory, where `sudo`
+never looks:
 
 | How you install it | Command lands in | `sudo uniservice` |
 | --- | --- | --- |
-| `pipx install uniservice` | `~/.local/bin` | **not found** |
-| `sudo pipx install --global uniservice` | `/usr/local/bin` (venv in `/opt/pipx`) | works |
+| `sudo pipx install --global uniservice` **(recommended)** | `/usr/local/bin` (venv in `/opt/pipx`) | works |
 | `./install.sh` (above) | `/usr/local/bin` | works |
+| `pipx install uniservice` | `~/.local/bin` | **not found** |
+| `uv tool install uniservice` | `~/.local/bin` | **not found** |
 
-`sudo` builds its own `PATH` from `secure_path`, which never contains your home directory, so a
-per-user install is invisible to it. For system services use `sudo pipx install --global`, or the
-installer; `sudo "$(command -v uniservice)" ...` also works, at the cost of depending on a venv
-inside your home directory. Note that `sudo pipx` only works when pipx itself was installed
-system-wide (apt, brew, or the standalone installer), not with `pip install --user`.
+`sudo` rebuilds `PATH` from `secure_path`, which never contains your home directory, so a per-user
+install is simply invisible to it. `sudo "$(command -v uniservice)" ...` works around that, at the
+cost of making root depend on a venv inside your home directory. `uv tool install` has no global
+mode of its own — for a system-wide uv install you would have to redirect `UV_TOOL_DIR` yourself,
+which is why pipx and the installer are the two supported ways to get `/usr/local/bin/uniservice`.
 
 Uninstall with the frontend that installed it — `pipx uninstall uniservice` or
 `uv tool uninstall uniservice`. `uniservice uninstall` refuses to touch a copy it did not install

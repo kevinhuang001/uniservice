@@ -62,26 +62,30 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 
 ### PyPI
 
-`uniservice` 也发布在 [PyPI](https://pypi.org/project/uniservice/) 上，任何 Python 包管理器都能装：
+`uniservice` 也发布在 [PyPI](https://pypi.org/project/uniservice/) 上。请用**全局**方式安装，
+因为只有它会把命令放到 `sudo` 能找到的地方：
 
 ```bash
-pipx install uniservice        # 或者：uv tool install uniservice
-uniservice --help
+sudo pipx install --global uniservice    # venv 在 /opt/pipx，命令在 /usr/local/bin
+uniservice --help                        # ……而且 `sudo uniservice ...` 也能用
 ```
 
-这种方式装的是普通的 Python 入口脚本，命令落在哪里取决于包管理器 —— 而这决定了
-`sudo uniservice ...` 还能不能找到它：
+`pipx --global` 写的是 `/opt/pipx` 和 `/usr/local/bin`，和安装器的落点完全一致。它的前提是 pipx 本身
+为系统级安装（apt、brew 或官方独立安装脚本）；用 `pip install --user` 装的 pipx 无法在 `sudo` 下运行。
+
+用户级安装当然也能用，只是命令落在你的家目录里，而 `sudo` 永远不会去那里找：
 
 | 安装方式 | 命令落在 | `sudo uniservice` |
 | --- | --- | --- |
-| `pipx install uniservice` | `~/.local/bin` | **找不到** |
-| `sudo pipx install --global uniservice` | `/usr/local/bin`（venv 在 `/opt/pipx`） | 正常 |
+| `sudo pipx install --global uniservice`（**推荐**） | `/usr/local/bin`（venv 在 `/opt/pipx`） | 正常 |
 | `./install.sh`（上面那种） | `/usr/local/bin` | 正常 |
+| `pipx install uniservice` | `~/.local/bin` | **找不到** |
+| `uv tool install uniservice` | `~/.local/bin` | **找不到** |
 
 `sudo` 会用 `secure_path` 重新拼 `PATH`，其中永远不含你的家目录，所以用户级安装对它就是不存在。
-要管系统服务，请用 `sudo pipx install --global`，或者用上面的安装器；`sudo "$(command -v uniservice)" ...`
-也能凑合，代价是 root 依赖于你家目录里的 venv。另外 `sudo pipx` 只在 pipx 本身是系统级安装时可用
-（apt、brew 或官方独立安装脚本），`pip install --user` 装的 pipx 不行。
+`sudo "$(command -v uniservice)" ...` 也能凑合，代价是 root 依赖于你家目录里的 venv。
+`uv tool install` 自己没有全局模式 —— 想用 uv 装成系统级只能自己重定向 `UV_TOOL_DIR`，
+所以受支持的 `/usr/local/bin/uniservice` 来源就两个：pipx 和安装器。
 
 卸载请用当初安装它的工具 —— `pipx uninstall uniservice` 或 `uv tool uninstall uniservice`。
 `uniservice uninstall` 不会碰不是自己装的副本，并会明确告诉你。

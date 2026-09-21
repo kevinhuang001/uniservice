@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `uniservice` is on [PyPI](https://pypi.org/project/uniservice/). The READMEs recommend
+  `sudo pipx install --global uniservice`, which puts the venv in `/opt/pipx` and the command in
+  `/usr/local/bin` - the same place the installer uses, and the only per-user-agnostic spot that
+  `sudo` searches, so `sudo uniservice ...` keeps working. `uniservice uninstall` now names the
+  frontend commands to use when it is asked to remove a copy it did not install.
+
 - The release workflow uploads the wheel and the sdist to PyPI through
   `pypa/gh-action-pypi-publish`, right after the GitHub release is published. It authenticates with
   the `PYPI_API_TOKEN` secret and skips itself with a notice while that secret is absent, so an

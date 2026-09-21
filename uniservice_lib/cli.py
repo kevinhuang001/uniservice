@@ -259,7 +259,9 @@ def _cmd_uninstall(*, dry_run: bool) -> int:
         locations = ", ".join(str(path) for path in (manifest_path_for(c) for c in running_commands()))
         raise UniserviceError(
             f"no uniservice installation is recorded at {locations or 'this location'}. "
-            "If it was installed with pip or pipx, uninstall it with that tool instead."
+            "Only a copy placed there by install.sh or install-windows.ps1 writes a manifest; "
+            "if this one came from PyPI, remove it with `pipx uninstall uniservice` "
+            "(`uv tool uninstall uniservice` or `pip uninstall uniservice`)."
         )
 
     logger.info("cmd=uninstall prefix=%s kind=%s", installation.prefix, installation.kind)
