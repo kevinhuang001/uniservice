@@ -139,3 +139,50 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$log"
+      - name: Keep the wheel and the sdist for the PyPI upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: [publish]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted Publishing authenticates with an OIDC token instead of a
+      # secret; the permission is inert when the API token path is used.
+      id-token: write
+    steps:
+      - name: Look for the upload credentials
+        id: credentials
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          # An unconfigured upload must not turn a good release red, so the
+          # whole job degrades to a notice until a token or a trusted
+          # publisher exists.
+          if [ -n "${PYPI_API_TOKEN}" ]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=PyPI::PYPI_API_TOKEN is not set, skipping the PyPI upload"
+          fi
+      - name: Collect the distribution files
+        if: steps.credentials.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Upload to PyPI
+        if: steps.credentials.outputs.available == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          # Re-pushing a tag must not fail the workflow: PyPI rejects an
+          # already uploaded filename, which is exactly the wanted outcome.
+          skip-existing: true

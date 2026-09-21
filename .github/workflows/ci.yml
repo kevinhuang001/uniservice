@@ -52,6 +52,46 @@ jobs:
           build/a/uniservice list
           test -x build/a/uniservice
 
+  package:
+    name: Package (PyPI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel and the sdist
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine
+          python -m build
+      - name: Check the metadata that PyPI will render
+        run: |
+          set -euo pipefail
+          if ! log="$(twine check dist/* 2>&1)"; then
+            printf '%s\n' "$log" >&2
+            python3 - "$log" <<'PY'
+          import sys
+          import urllib.parse
+
+          print("::error title=twine check failed::" + urllib.parse.quote(sys.argv[1], safe=""))
+          PY
+            exit 1
+          fi
+          printf '%s\n' "$log"
+      - name: Install the wheel into a clean environment
+        run: |
+          set -euo pipefail
+          # pipx and uv install the wheel, not the checkout, so this is the only
+          # place the console script is exercised the way a user gets it.
+          python -m venv venv
+          venv/bin/python -m pip install --upgrade pip
+          venv/bin/python -m pip install dist/*.whl
+          test -x venv/bin/uniservice
+          venv/bin/uniservice --version
+          venv/bin/uniservice list
+          venv/bin/python -c "import uniservice_lib, uniservice_lib.backends.linux"
+
   binaries:
     name: Binary (${{ matrix.name }})
     runs-on: ${{ matrix.os }}

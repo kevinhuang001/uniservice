@@ -20,6 +20,7 @@
 | --- | --- | --- | --- |
 | **默认** | 便携 zipapp | ~30 KB | 机器上有 Python 3.10+ |
 | `--binary` | 独立二进制 | ~24 MB | 什么都不需要（自带 CPython） |
+| — | Python 包（[PyPI](https://pypi.org/project/uniservice/)） | ~37 KB | pipx、uv 或 pip + Python 3.10+ |
 
 **推荐默认的 zipapp**：一个很小的文件，在任何平台上内容一致，直接跑你已有的 Python。独立二进制是给
 没有 Python 环境的机器准备的；因为 PyInstaller **不能交叉编译**，它必须按 OS + CPU 架构分别构建和发布。
@@ -59,6 +60,32 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 
 `install.sh` 同样认 `UNISERVICE_BINARY=1`。
 
+### PyPI
+
+`uniservice` 也发布在 [PyPI](https://pypi.org/project/uniservice/) 上，任何 Python 包管理器都能装：
+
+```bash
+pipx install uniservice        # 或者：uv tool install uniservice
+uniservice --help
+```
+
+这种方式装的是普通的 Python 入口脚本，命令落在哪里取决于包管理器 —— 而这决定了
+`sudo uniservice ...` 还能不能找到它：
+
+| 安装方式 | 命令落在 | `sudo uniservice` |
+| --- | --- | --- |
+| `pipx install uniservice` | `~/.local/bin` | **找不到** |
+| `sudo pipx install --global uniservice` | `/usr/local/bin`（venv 在 `/opt/pipx`） | 正常 |
+| `./install.sh`（上面那种） | `/usr/local/bin` | 正常 |
+
+`sudo` 会用 `secure_path` 重新拼 `PATH`，其中永远不含你的家目录，所以用户级安装对它就是不存在。
+要管系统服务，请用 `sudo pipx install --global`，或者用上面的安装器；`sudo "$(command -v uniservice)" ...`
+也能凑合，代价是 root 依赖于你家目录里的 venv。另外 `sudo pipx` 只在 pipx 本身是系统级安装时可用
+（apt、brew 或官方独立安装脚本），`pip install --user` 装的 pipx 不行。
+
+卸载请用当初安装它的工具 —— `pipx uninstall uniservice` 或 `uv tool uninstall uniservice`。
+`uniservice uninstall` 不会碰不是自己装的副本，并会明确告诉你。
+
 ### 安装器参数
 
 ```
@@ -91,7 +118,7 @@ zipapp 的构建是**逐字节可复现**的，所以固定 `--sha256` 就能得
 | `uniservice-linux-x86_64`、`uniservice-linux-aarch64` | 独立二进制 |
 | `uniservice-macos-arm64`、`uniservice-macos-x86_64` | 独立二进制 |
 | `uniservice-windows-x86_64.exe` | 独立二进制 |
-| `uniservice-<version>-py3-none-any.whl`、`.tar.gz` | 同一份代码的 Python 包 |
+| `uniservice-<version>-py3-none-any.whl`、`.tar.gz` | 同一份代码的 Python 包，PyPI 上也有 |
 | `SHA256SUMS` | 以上全部的摘要 |
 
 ### 自己校验

@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- The release workflow uploads the wheel and the sdist to PyPI through
+  `pypa/gh-action-pypi-publish`, right after the GitHub release is published. It authenticates with
+  the `PYPI_API_TOKEN` secret and skips itself with a notice while that secret is absent, so an
+  unconfigured upload never fails a release. Trusted Publishing is a one-line switch: delete the
+  `password:` input and add a pending publisher on PyPI for this repository.
+
 ### Fixed
 
 - Re-creating a service under the same name starts with an empty log. `create` now removes the

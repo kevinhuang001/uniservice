@@ -20,6 +20,7 @@ Every release publishes **two artifacts**, and the installer lets you pick one:
 | --- | --- | --- | --- |
 | **default** | portable zipapp | ~30 KB | Python 3.10+ on the machine |
 | `--binary` | standalone binary | ~24 MB | nothing (bundles its own CPython) |
+| — | Python package ([PyPI](https://pypi.org/project/uniservice/)) | ~37 KB | pipx, uv or pip + Python 3.10+ |
 
 **The zipapp is the recommended default**: one small file that is byte-identical on every
 platform, and it runs on the Python you already have. The standalone binary exists for machines
@@ -63,6 +64,35 @@ iwr -useb https://raw.githubusercontent.com/kevinhuang001/uniservice/main/instal
 
 The same `UNISERVICE_BINARY=1` environment variable works for `install.sh`.
 
+### PyPI
+
+`uniservice` is published on [PyPI](https://pypi.org/project/uniservice/) as well, so any Python
+package frontend can install it:
+
+```bash
+pipx install uniservice        # or: uv tool install uniservice
+uniservice --help
+```
+
+This route is a normal Python entry point, so where the command lands depends on the frontend —
+and that decides whether `sudo uniservice ...` can find it:
+
+| How you install it | Command lands in | `sudo uniservice` |
+| --- | --- | --- |
+| `pipx install uniservice` | `~/.local/bin` | **not found** |
+| `sudo pipx install --global uniservice` | `/usr/local/bin` (venv in `/opt/pipx`) | works |
+| `./install.sh` (above) | `/usr/local/bin` | works |
+
+`sudo` builds its own `PATH` from `secure_path`, which never contains your home directory, so a
+per-user install is invisible to it. For system services use `sudo pipx install --global`, or the
+installer; `sudo "$(command -v uniservice)" ...` also works, at the cost of depending on a venv
+inside your home directory. Note that `sudo pipx` only works when pipx itself was installed
+system-wide (apt, brew, or the standalone installer), not with `pip install --user`.
+
+Uninstall with the frontend that installed it — `pipx uninstall uniservice` or
+`uv tool uninstall uniservice`. `uniservice uninstall` refuses to touch a copy it did not install
+and tells you so.
+
 ### Installer options
 
 ```
@@ -96,7 +126,7 @@ zipapp alternative.
 | `uniservice-linux-x86_64`, `uniservice-linux-aarch64` | standalone binaries |
 | `uniservice-macos-arm64`, `uniservice-macos-x86_64` | standalone binaries |
 | `uniservice-windows-x86_64.exe` | standalone binary |
-| `uniservice-<version>-py3-none-any.whl`, `.tar.gz` | the same code as a Python package |
+| `uniservice-<version>-py3-none-any.whl`, `.tar.gz` | the same code as a Python package, also on PyPI |
 | `SHA256SUMS` | digests for everything above |
 
 ### Verify the checksum yourself
