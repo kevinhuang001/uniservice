@@ -11,7 +11,7 @@ from tests.conftest import FakeBackend
 from uniservice_lib import cli
 from uniservice_lib.backends.base import ServiceInfo
 from uniservice_lib.commands import Context, service
-from uniservice_lib.console import Console
+from uniservice_lib.console import Console, strip_ansi
 from uniservice_lib.errors import UniserviceError
 from uniservice_lib.exitcodes import FAILURE, OK, USAGE
 from uniservice_lib.scope import Scope
@@ -504,7 +504,8 @@ def test_status_flushes_our_header_before_the_native_output(
 
     assert cli.main(["status", "demo"]) == OK
 
-    lines = tty.getvalue().splitlines()
+    # The console colours the heading, so compare the printable text.
+    lines = [strip_ansi(line) for line in tty.getvalue().splitlines()]
     assert lines[0].startswith("demo · user scope")
     assert "native output" in lines
 

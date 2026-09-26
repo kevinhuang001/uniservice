@@ -241,6 +241,12 @@ def tty(monkeypatch: pytest.MonkeyPatch) -> TtyStream:
     """
     from uniservice_lib import cli as cli_module
 
+    # A fake terminal must behave the same on a developer machine (which may set
+    # NO_COLOR and TERM=dumb) as on a CI runner (which may set neither), so pin
+    # the two variables the colour decision reads.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+
     stream = TtyStream()
     real = cli_module.Console
 
