@@ -88,7 +88,8 @@ uniservice --help                        # ……而且 `sudo uniservice ...` �
 所以受支持的 `/usr/local/bin/uniservice` 来源就两个：pipx 和安装器。
 
 卸载请用当初安装它的工具 —— `pipx uninstall uniservice` 或 `uv tool uninstall uniservice`。
-`uniservice self uninstall` 不会碰不是自己装的副本，并会明确告诉你。
+安装脚本只会删掉**它自己写的**那份（靠 manifest 判断），所以 PyPI 装的副本不会被
+`install.sh --uninstall` 碰到。
 
 ### 安装器参数
 
@@ -162,15 +163,17 @@ uniservice <command> [options]
 | `status [NAME]` | `NAME` 的原生状态；不带参数则是全部服务的表格 |
 | `logs NAME [-f]` | 打印捕获的输出 |
 | `show NAME` | 服务是怎么定义的，以及如何重建它 |
-| `self info`、`self uninstall` | 管理 uniservice 自身的安装 |
 | `doctor` | 端到端体检这台机器 |
 | `version` | 打印各组件版本 |
 
 所有控制类命令都接受**一个或多个**名字并逐个汇报，所以 `uniservice restart api worker` 是一条命令；
 只要其中任何一个失败，整体退出码就是非零。
 
-安装类命令放在 `self` 下面是有意的：`uniservice remove NAME` 删的是**服务**，`uniservice self uninstall`
-删的是 **uniservice 自己**。在命令树里把这件事说清楚，`uniservice --help` 才不会读起来像是两者平级。
+上面每一条操作的都是**服务**。**安装和卸载 uniservice 本身是安装脚本的职责**，不是命令的职责：
+`install.sh --uninstall` 和 `install-windows.ps1 -Uninstall` 才拥有自己写下的目录结构；而且它们是
+**另一个进程**，删的不是正在运行的那个文件，所以 Windows 上根本不存在"运行中的镜像删不掉自己"这个
+问题。`uniservice version` 和 `uniservice doctor` 仍然会**报告**这份命令装在哪、是怎么装的 —— 提 issue
+时需要的正是这些。
 
 ### 作用域（macOS/Linux）
 
@@ -279,14 +282,6 @@ uniservice rm demo api         # 一次停止、禁用并删除多个
 
 `remove` 会先执行 `stop` + `disable` 再删除定义。
 
-### self
-
-```bash
-uniservice self info            # 这份命令装在哪、是怎么装的
-uniservice self uninstall       # 把它删掉
-uniservice self uninstall --dry-run
-```
-
 ### doctor 与 version
 
 ```bash
@@ -347,7 +342,6 @@ uniservice_lib/
   commands/
     __init__.py             Context：console + scope + backend，以及权限规则
     service.py              list、add、start/stop/restart、enable/disable、remove、status、logs、show
-    selfcmd.py              self info、self uninstall
     diagnostics.py          doctor、version
   scope.py                  user / system 作用域
   naming.py                 服务名校验与原生定义名
@@ -355,7 +349,7 @@ uniservice_lib/
   platform_utils.py         平台与权限探测
   logging_utils.py          控制台 + 文件日志
   errors.py                 异常体系
-  installation.py           安装器留下的 manifest
+  installation.py           定位安装位置、读取安装器写的 manifest
   backends/
     __init__.py             后端选择
     base.py                 Backend 接口、ServiceInfo、ServiceDefinition、Check
@@ -416,16 +410,28 @@ sdist、zipapp、各平台二进制和 `SHA256SUMS`。
 
 ## 卸载
 
-`uniservice` 可以自己删掉自己：
+卸载由安装脚本负责：
 
 ```bash
-sudo uniservice self uninstall        # 装在自定义前缀时直接：uniservice self uninstall
-uniservice self uninstall --dry-run   # 先看看会删什么
+sudo ./install.sh --uninstall              # macOS/Linux
+./install.sh --uninstall --prefix DIR      # 装在自定义前缀时
+./install.sh --uninstall --dry-run         # 先看看会删什么
+./install-windows.ps1 -Uninstall           # Windows
+./install-windows.ps1 -Uninstall -DryRun   # ……以及它的预览
 ```
 
-它读取安装器写下的 manifest（`/usr/local/lib/uniservice/manifest`），只删除记录过的文件，并把因此
-变空的目录清理掉。安装器从未写过任何 `PATH` 行，所以没有别的东西要清。Windows 上正在运行的 `.exe`
-无法删除自己，命令会把最后这个文件交给一个短命 helper，命令返回后稍等片刻它就消失了。
+大多数人是管道安装的，所以一行式同样可用：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh \
+  | sudo bash -s -- --uninstall
+```
+
+它读取自己写下的 manifest（`/usr/local/lib/uniservice/manifest`），只删除记录过的文件，并把因此变空的
+目录清理掉。安装器从未写过任何 `PATH` 行，所以没有别的东西要清。
+
+**如果 uniservice 是 pipx 或 uv 装的，上面这条命令不是你要的** —— 请用当初装它的工具卸载
+（`pipx uninstall uniservice`）。安装脚本只删自己写的那份，依据是 manifest。
 
 **你自己创建的服务不受影响** —— 只删命令本身。不想要的服务请在命令还在的时候先删掉：
 
@@ -434,10 +440,5 @@ uniservice list
 uniservice remove <name>
 ```
 
-如果命令已经损坏或已被删掉，安装器仍然可以收拾残局：
-
-```bash
-sudo ./install.sh --uninstall          # macOS/Linux，同一份 manifest
-./install.sh --uninstall --prefix DIR  # 装在自定义前缀时
-./install-windows.ps1 -Uninstall       # Windows
-```
+想手工删也行：`uniservice version` 和 `uniservice doctor` 会打印前缀、安装方式和 manifest 路径，
+manifest 里则列着具体文件。

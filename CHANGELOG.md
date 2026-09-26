@@ -5,6 +5,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-21
+
+### Removed
+
+- The `self` group, and with it `uniservice uninstall` / `uniservice self info`.
+  Uninstalling is the install scripts' job again (`install.sh --uninstall`,
+  `install-windows.ps1 -Uninstall`), which is where it started and where it
+  belongs: they own the layout they wrote, and they run as a different process
+  from the command they delete.
+
+  That last part is the point. A running image cannot delete itself on Windows,
+  so the in-command uninstaller needed a detached `cmd.exe` helper plus a
+  `MoveFileEx(..., DELAY_UNTIL_REBOOT)` registration as a backstop, and its
+  output had to admit the command was still there "a moment after this command
+  exits".  Every one of those paths - `remove_installation`,
+  `_schedule_windows_delete`, `_register_reboot_delete`, the deferred-file
+  bookkeeping, their tests and the CI steps that waited for a prefix to
+  disappear - is gone.  `installation.py` is now read-only and 114 lines instead
+  of 268.
+
+  What is lost is `uniservice self info`; `uniservice version` and
+  `uniservice doctor` already report the prefix, the kind, the version and the
+  manifest path, which is what a bug report needs.  The `--dry-run` preview moved
+  to the installers as `install.sh --uninstall --dry-run` and
+  `install-windows.ps1 -Uninstall -DryRun`.
+
+  A PyPI install was never removable this way anyway - `pipx uninstall
+  uniservice` is the command for that - and the installers only ever remove a
+  copy whose manifest they wrote.
+
 ## [2.0.0] - 2026-09-21
 
 The command line was redesigned around what each command *acts on*, and the

@@ -540,40 +540,8 @@ def test_logs_accepts_the_short_flags(install_backend, cli_privileges: None) -> 
 
 
 # ---------------------------------------------------------------------------
-# self / diagnostics
+# diagnostics
 # ---------------------------------------------------------------------------
-
-
-def test_self_uninstall_reports_when_nothing_is_recorded(
-    cli_privileges: None, capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert cli.main(["self", "uninstall"]) == FAILURE
-    assert "no uniservice installation is recorded" in capsys.readouterr().err
-
-
-def test_self_uninstall_dry_run_keeps_everything(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, cli_privileges: None, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from tests.test_installation import make_installation
-    from uniservice_lib.commands import selfcmd
-
-    installation = make_installation(tmp_path)
-    monkeypatch.setattr(selfcmd, "find_installation", lambda: installation)
-
-    assert cli.main(["self", "uninstall", "--dry-run"]) == OK
-
-    assert installation.command.exists()
-    assert "would remove" in capsys.readouterr().out
-
-
-def test_self_without_a_subcommand_prints_its_help(cli_privileges: None, capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["self"]) == USAGE
-    assert "self" in capsys.readouterr().err
-
-
-def test_self_info_reports_an_unmanaged_copy(cli_privileges: None, capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["self", "info"]) == OK
-    assert "not installed by install.sh" in capsys.readouterr().err
 
 
 def test_version_prints_the_components(cli_privileges: None, capsys: pytest.CaptureFixture[str]) -> None:

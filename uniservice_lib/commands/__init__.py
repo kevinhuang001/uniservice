@@ -24,10 +24,9 @@ __all__ = ["Context"]
 class Context:
     """What every command needs: where to print, and which backend to drive.
 
-    The backend is built on first use, so commands that only inspect the
-    installation (``version``, ``self info``) keep working on a platform that
-    has no backend at all, and ``doctor`` can report that fact instead of
-    failing before it starts.
+    The backend is built on first use, so ``version`` and ``doctor`` keep
+    working on a platform that has no backend at all: they report the fact
+    instead of failing before they start.
     """
 
     console: Console

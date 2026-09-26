@@ -40,6 +40,10 @@
 .PARAMETER NoModifyPath
   Never edit PATH (user environment or PowerShell profile).
 
+.PARAMETER DryRun
+
+  With -Uninstall, list what would be removed and stop.
+
 .PARAMETER Uninstall
   Remove a previous installation recorded in the manifest.
 
@@ -60,7 +64,8 @@ param(
   [string]$Sha256 = '',
   [string]$From = '',
   [switch]$NoModifyPath,
-  [switch]$Uninstall
+  [switch]$Uninstall,
+  [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -143,7 +148,8 @@ function Test-PythonAvailable {
 function Get-ManifestPath {
   param([string]$TargetPrefix)
   # Same layout as install.sh: <prefix>/lib/uniservice/manifest, so that
-  # `uniservice self uninstall` finds it from the running command on every platform.
+  # Read back by `uniservice version` and `uniservice doctor`; removal is this
+  # script's job, so the layout can stay identical on every platform.
   return (Join-Path (Join-Path (Join-Path $TargetPrefix 'lib') $ProgramName) $ManifestName)
 }
 
@@ -158,7 +164,7 @@ function Read-Manifest {
 }
 
 function Invoke-Uninstall {
-  param([string]$TargetPrefix)
+  param([string]$TargetPrefix, [switch]$Preview)
   $manifestPath = Get-ManifestPath -TargetPrefix $TargetPrefix
   if (-not (Test-Path -LiteralPath $manifestPath)) {
     Write-Note "nothing was removed: no installation manifest at $manifestPath"
@@ -166,6 +172,17 @@ function Invoke-Uninstall {
   }
 
   $data = Read-Manifest -Path $manifestPath
+  if ($Preview) {
+    Write-Step 'Would remove:'
+    foreach ($key in @('binary', 'shim')) {
+      if ($data.ContainsKey($key) -and $data[$key] -and (Test-Path -LiteralPath $data[$key])) {
+        Write-Host "  $($data[$key])"
+      }
+    }
+    Write-Host "  $manifestPath"
+    return
+  }
+
   foreach ($key in @('binary', 'shim')) {
     if ($data.ContainsKey($key) -and $data[$key] -and (Test-Path -LiteralPath $data[$key])) {
       Remove-Item -Force -LiteralPath $data[$key]
@@ -346,8 +363,11 @@ if (`$env:Path -notlike "*`$uniserviceBin*") { `$env:Path = `$env:Path + ';' + `
 
 function Invoke-Main {
   $targetPrefix = if ($Prefix) { $Prefix } else { Join-Path $env:LOCALAPPDATA 'uniservice' }
+  if ($DryRun -and -not $Uninstall) {
+    Write-Note '-DryRun only applies to -Uninstall'
+  }
   if ($Uninstall) {
-    Invoke-Uninstall -TargetPrefix $targetPrefix
+    Invoke-Uninstall -TargetPrefix $targetPrefix -Preview:$DryRun
     return
   }
   Invoke-Install -TargetPrefix $targetPrefix

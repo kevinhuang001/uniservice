@@ -95,8 +95,8 @@ mode of its own — for a system-wide uv install you would have to redirect `UV_
 which is why pipx and the installer are the two supported ways to get `/usr/local/bin/uniservice`.
 
 Uninstall with the frontend that installed it — `pipx uninstall uniservice` or
-`uv tool uninstall uniservice`. `uniservice self uninstall` refuses to touch a copy it did not install
-and tells you so.
+`uv tool uninstall uniservice`. The install scripts only ever remove a copy *they* wrote, so a PyPI
+install is never touched by `install.sh --uninstall`.
 
 ### Installer options
 
@@ -172,7 +172,6 @@ uniservice <command> [options]
 | `status [NAME]` | the native status of `NAME`, or a table of everything |
 | `logs NAME [-f]` | print the captured output |
 | `show NAME` | how the service is defined, and how to recreate it |
-| `self info`, `self uninstall` | manage the uniservice installation itself |
 | `doctor` | check this machine end to end |
 | `version` | print component versions |
 
@@ -180,10 +179,12 @@ Every control verb takes **one or more** names and reports each one, so
 `uniservice restart api worker` is a single command; it exits non-zero if any of
 them failed.
 
-The installation commands live under `self` on purpose. `uniservice remove NAME`
-deletes a *service*; `uniservice self uninstall` deletes *uniservice*. Saying so
-in the command tree keeps `uniservice --help` from reading as if the two were
-neighbours.
+Every one of those acts on a service. **Installing and removing uniservice itself is the install
+scripts' job**, not the command's: `install.sh --uninstall` and
+`install-windows.ps1 -Uninstall` own the layout they wrote, and because they run as a different
+process from the command they delete, there is no "cannot delete a running image" case to work
+around on Windows. `uniservice version` and `uniservice doctor` still *report* where this copy lives
+and how it was installed, which is what you need for a bug report.
 
 ### Scope (macOS/Linux)
 
@@ -297,14 +298,6 @@ uniservice rm demo api         # stop, disable and delete several
 
 `remove` performs `stop` + `disable` before deleting the definition.
 
-### Self
-
-```bash
-uniservice self info            # where this copy lives, how it was installed
-uniservice self uninstall       # remove the command again
-uniservice self uninstall --dry-run
-```
-
 ### Doctor and version
 
 ```bash
@@ -370,7 +363,6 @@ uniservice_lib/
   commands/
     __init__.py             Context: console + scope + backend, and the privilege rules
     service.py              list, add, start/stop/restart, enable/disable, remove, status, logs, show
-    selfcmd.py              self info, self uninstall
     diagnostics.py          doctor, version
   scope.py                  user vs. system scope
   naming.py                 service-name validation and native definition names
@@ -378,7 +370,7 @@ uniservice_lib/
   platform_utils.py         platform and privilege detection
   logging_utils.py          console + file logging
   errors.py                 exception hierarchy
-  installation.py           the manifest an installer leaves behind
+  installation.py           locating the copy and reading the installer's manifest
   backends/
     __init__.py             backend selection
     base.py                 Backend interface, ServiceInfo, ServiceDefinition, Check
@@ -441,17 +433,30 @@ Windows, and builds the standalone binary for five targets. Pushing a `v*` tag r
 
 ## Uninstall
 
-`uniservice` removes itself:
+The install script does it:
 
 ```bash
-sudo uniservice self uninstall        # or: uniservice self uninstall, for a --prefix install
-uniservice self uninstall --dry-run   # show what would be removed first
+sudo ./install.sh --uninstall              # macOS/Linux
+./install.sh --uninstall --prefix DIR      # if you installed to a custom prefix
+./install.sh --uninstall --dry-run         # show what would be removed first
+./install-windows.ps1 -Uninstall           # Windows
+./install-windows.ps1 -Uninstall -DryRun   # ... and its preview
 ```
 
-It reads the manifest its installer wrote (`/usr/local/lib/uniservice/manifest`), deletes exactly
-those files and prunes the directories that become empty. It never added a `PATH` line, so there is
-nothing else to clean up. On Windows the running `.exe` cannot delete itself, so the command hands
-that last file to a short-lived helper and it disappears a moment after the command returns.
+The one-liner form works too, since that is how most people install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kevinhuang001/uniservice/main/install.sh \
+  | sudo bash -s -- --uninstall
+```
+
+It reads the manifest it wrote (`/usr/local/lib/uniservice/manifest`), deletes exactly those files
+and prunes the directories that become empty. It never added a `PATH` line, so there is nothing else
+to clean up.
+
+**If uniservice came from pipx or uv, that is not the right command** - remove it with the frontend
+that installed it (`pipx uninstall uniservice`). The installer only removes a copy it wrote itself,
+which it knows from the manifest.
 
 **Your services are untouched** - only the command is removed. Delete the services you no longer
 want first, while the command still exists:
@@ -461,10 +466,5 @@ uniservice list
 uniservice remove <name>
 ```
 
-If the command is already broken or gone, the installer can still clean up after it:
-
-```bash
-sudo ./install.sh --uninstall              # macOS/Linux, same manifest
-./install.sh --uninstall --prefix DIR      # if you installed to a custom prefix
-./install-windows.ps1 -Uninstall           # Windows
-```
+If you would rather remove it by hand, `uniservice version` and `uniservice doctor` print the prefix,
+the kind and the manifest path; the manifest lists the files themselves.

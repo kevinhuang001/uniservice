@@ -191,33 +191,51 @@ def test_from_detects_a_standalone_binary(tmp_path: Path) -> None:
     assert manifest_of(prefix)["kind"] == "binary"
 
 
-def test_self_uninstall_removes_the_installation(tmp_path: Path) -> None:
-    """`uniservice self uninstall` must undo what install.sh did, including itself."""
+def test_the_installer_removes_a_working_installation(tmp_path: Path) -> None:
+    """Uninstall is the install script's job, and it must undo a live install.
+
+    The command itself cannot do this on Windows, where a running image cannot
+    delete itself; running the removal from the installer means it never has to.
+    """
     prefix = tmp_path / "pfx"
     zipapp = build_zipapp(tmp_path / "dist" / "uniservice")
     assert run_installer("--prefix", str(prefix), "--from", str(zipapp)).returncode == 0
 
-    completed = subprocess.run(
-        [sys.executable, str(prefix / "bin" / "uniservice"), "self", "uninstall"],
+    version = subprocess.run(
+        [sys.executable, str(prefix / "bin" / "uniservice"), "--version"],
         capture_output=True,
         text=True,
         check=False,
         timeout=120,
     )
+    assert version.returncode == 0, version.stderr
+
+    completed = run_installer("--uninstall", "--prefix", str(prefix))
 
     assert completed.returncode == 0, completed.stderr
-    assert "removed uniservice" in completed.stdout
     assert not prefix.exists()
 
 
-def test_self_info_describes_the_installation(tmp_path: Path) -> None:
-    """The manifest is the source of truth for `uniservice self info`."""
+def test_uninstall_dry_run_changes_nothing(tmp_path: Path) -> None:
+    prefix = tmp_path / "pfx"
+    zipapp = build_zipapp(tmp_path / "dist" / "uniservice")
+    assert run_installer("--prefix", str(prefix), "--from", str(zipapp)).returncode == 0
+
+    completed = run_installer("--uninstall", "--dry-run", "--prefix", str(prefix))
+
+    assert completed.returncode == 0, completed.stderr
+    assert prefix.joinpath("bin", "uniservice").exists()
+    assert "Would remove:" in completed.stdout
+
+
+def test_version_reports_the_installation(tmp_path: Path) -> None:
+    """The manifest is still read back, by `version` and `doctor`."""
     prefix = tmp_path / "pfx"
     zipapp = build_zipapp(tmp_path / "dist" / "uniservice")
     assert run_installer("--prefix", str(prefix), "--from", str(zipapp)).returncode == 0
 
     completed = subprocess.run(
-        [sys.executable, str(prefix / "bin" / "uniservice"), "self", "info", "--json"],
+        [sys.executable, str(prefix / "bin" / "uniservice"), "version", "--json"],
         capture_output=True,
         text=True,
         check=False,
@@ -226,9 +244,8 @@ def test_self_info_describes_the_installation(tmp_path: Path) -> None:
 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
-    assert payload["prefix"] == str(prefix)
-    assert payload["kind"] == "zipapp"
-    assert payload["version"]
+    assert str(prefix) in payload["install"]
+    assert "zipapp" in payload["install"]
 
 
 def test_uninstall_leaves_a_prefix_that_holds_other_files(tmp_path: Path) -> None:
@@ -442,3 +459,10 @@ def test_a_tampered_asset_is_rejected(tmp_path: Path) -> None:
     assert completed.returncode == 1
     assert "SHA-256 mismatch" in completed.stderr
     assert not (tmp_path / "pfx" / "bin" / "uniservice").exists()
+
+
+def test_dry_run_without_uninstall_is_rejected(tmp_path: Path) -> None:
+    """A silently ignored flag is worse than a usage error."""
+    completed = run_installer("--dry-run", "--prefix", str(tmp_path / "pfx"))
+    assert completed.returncode == 1
+    assert "--dry-run only applies to --uninstall" in completed.stderr

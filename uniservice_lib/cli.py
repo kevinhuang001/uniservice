@@ -15,7 +15,7 @@ import traceback
 from collections.abc import Sequence
 from typing import Any
 
-from .commands import Context, selfcmd, service
+from .commands import Context, service
 from .commands import diagnostics as diagnostics_cmd
 from .console import Console
 from .errors import UniserviceError, UsageError
@@ -118,24 +118,11 @@ def dispatch(ctx: Context, args: Any) -> int:
         return service.cmd_remove(ctx, args)
     if command in CONTROL_VERBS:
         return service.cmd_control(ctx, args)
-    if command == "self":
-        return _cmd_self(ctx, args)
     if command == "doctor":
         return diagnostics_cmd.cmd_doctor(ctx, args)
     if command == "version":
         return diagnostics_cmd.cmd_version(ctx, args)
     raise UsageError(f"unknown command {command!r}")  # pragma: no cover - parser rejects it first
-
-
-def _cmd_self(ctx: Context, args: Any) -> int:
-    sub = getattr(args, "self_command", None)
-    if sub == "info":
-        return selfcmd.cmd_info(ctx, args)
-    if sub == "uninstall":
-        return selfcmd.cmd_uninstall(ctx, args)
-    # `uniservice self` on its own: show what `self` can do instead of failing.
-    print(subcommand_help("self"), end="", file=sys.stderr)
-    return USAGE
 
 
 def _cmd_help(topic: str | None) -> int:

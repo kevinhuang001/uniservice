@@ -50,11 +50,11 @@ def test_every_documented_command_exists() -> None:
                 assert word in known, f"{group}: {word} is documented but not implemented"
 
 
-def test_usage_lists_the_three_groups() -> None:
+def test_usage_lists_the_two_groups() -> None:
     text = usage_text()
     assert "service commands:" in text
-    assert "installation:" in text
     assert "diagnostics:" in text
+    assert "installation:" not in text
 
 
 def test_usage_explains_the_scope_rule() -> None:
@@ -78,10 +78,11 @@ def test_a_global_flag_given_before_the_command_survives() -> None:
     assert args.json is True
 
 
-def test_global_flags_reach_nested_subcommands() -> None:
-    parser = build_parser()
-    assert parser.parse_args(["self", "info", "--json"]).json is True
-    assert parser.parse_args(["self", "--json", "info"]).json is True
+def test_the_installation_commands_are_gone() -> None:
+    """Uninstall belongs to the install scripts, which can delete from outside."""
+    with pytest.raises(UsageError, match="invalid choice"):
+        build_parser().parse_args(["self", "uninstall"])
+    assert "self" not in _all_names()
 
 
 def test_aliases_point_at_the_same_parser() -> None:
@@ -127,7 +128,7 @@ def test_unknown_flags_raise_a_usage_error() -> None:
 
 def test_subcommand_help_covers_topics() -> None:
     assert "uniservice add" in subcommand_help("add")
-    assert subcommand_help("self") != ""
+    assert subcommand_help("doctor") != ""
     assert subcommand_help("nope") == ""
 
 

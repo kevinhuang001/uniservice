@@ -36,6 +36,7 @@ version=""
 expected_sha256=""
 from_file=""
 uninstall=0
+dry_run=0
 
 tmp_dir=""
 artifact=""
@@ -79,9 +80,12 @@ Options:
   --sha256 HEX          Verify the artifact against this SHA-256 digest.
                         By default the digest published in $CHECKSUM_FILE is used.
   --from FILE           Install a local zipapp or binary instead of downloading.
-  --uninstall           Remove a previous installation recorded in the manifest.
-                        'uniservice self uninstall' does the same thing from the
-                        installed command, and is the normal way to do it.
+  --uninstall           Remove a previous installation recorded in the
+                        manifest. This is the only way to uninstall: the command
+                        cannot delete itself on Windows, so removal lives here,
+                        where it runs as a different process from the command it
+                        deletes.
+  --dry-run             With --uninstall, list what would be removed and stop.
   -h, --help            Show this help.
 
 Environment:
@@ -129,6 +133,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --from=*) from_file="${1#*=}" ;;
     --uninstall) uninstall=1 ;;
+    --dry-run) dry_run=1 ;;
     -h | --help)
       usage
       exit 0
@@ -246,6 +251,10 @@ require_python() {
 # ---------------------------------------------------------------------------
 # Uninstall
 # ---------------------------------------------------------------------------
+if [[ "$dry_run" -eq 1 && "$uninstall" -eq 0 ]]; then
+  die "--dry-run only applies to --uninstall"
+fi
+
 if [[ "$uninstall" -eq 1 ]]; then
   [[ -f "$manifest" ]] || die "no installation recorded at $manifest"
 
@@ -254,6 +263,14 @@ if [[ "$uninstall" -eq 1 ]]; then
   recorded_version="$(manifest_value version)"
   [[ -n "$recorded_prefix" ]] || recorded_prefix="$prefix"
   [[ -n "$recorded_binary" ]] || recorded_binary="$bin_dir/$PROGRAM_NAME"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would remove:"
+    [[ -e "$recorded_binary" ]] && log "  $recorded_binary"
+    log "  $manifest"
+    log "  and any directory under $recorded_prefix that becomes empty"
+    exit 0
+  fi
 
   if [[ -e "$recorded_binary" ]]; then
     [[ -w "$(dirname "$recorded_binary")" ]] || die "cannot remove $recorded_binary; run the installer with sudo"
