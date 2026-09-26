@@ -325,3 +325,7 @@ jobs:
         run: uniservice --version
       - name: Run the test suite
         run: python .github/scripts/run_tests.py -v
+      - name: Run the CLI tests under the system scope
+        # Windows always derives the system scope, and its runners are the
+        # slowest feedback loop; this repeats that derivation everywhere.
+        run: python .github/scripts/run_tests.py -q -p tests.system_scope_plugin

@@ -224,14 +224,16 @@ def test_list_ls_alias(install_backend, cli_privileges: None, capsys: pytest.Cap
     assert "demo\tyes\tyes" in capsys.readouterr().out
 
 
-def test_list_json(install_backend, cli_privileges: None, capsys: pytest.CaptureFixture[str]) -> None:
+def test_list_json(install_backend, cli_privileges: None, host_scope: str, capsys: pytest.CaptureFixture[str]) -> None:
     install_backend(rows=[ServiceInfo("demo", True, None)])
 
     assert cli.main(["list", "--json"]) == OK
 
     import json
 
-    assert json.loads(capsys.readouterr().out) == [{"name": "demo", "scope": "user", "enabled": True, "running": None}]
+    assert json.loads(capsys.readouterr().out) == [
+        {"name": "demo", "scope": host_scope, "enabled": True, "running": None}
+    ]
 
 
 def test_list_quiet_prints_only_names(
@@ -253,10 +255,12 @@ def test_list_on_a_terminal_draws_a_table(install_backend, cli_privileges: None,
     assert "\t" not in out
 
 
-def test_list_on_a_terminal_explains_an_empty_scope(install_backend, cli_privileges: None, tty) -> None:
+def test_list_on_a_terminal_explains_an_empty_scope(
+    install_backend, cli_privileges: None, host_scope: str, tty
+) -> None:
     install_backend(rows=[])
     assert cli.main(["list"]) == OK
-    assert "no services in the user scope yet" in tty.getvalue()
+    assert f"no services in the {host_scope} scope yet" in tty.getvalue()
 
 
 def test_list_reports_backend_failures(
@@ -429,14 +433,14 @@ def test_add_overwrites_after_confirmation(
 
 
 def test_show_prints_the_definition_and_the_recreate_line(
-    install_backend, cli_privileges: None, capsys: pytest.CaptureFixture[str]
+    install_backend, cli_privileges: None, host_scope: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     install_backend()
 
     assert cli.main(["show", "demo"]) == OK
 
     out = capsys.readouterr().out
-    assert "demo · user scope" in out
+    assert f"demo · {host_scope} scope" in out
     assert "location" in out
     assert "uniservice add demo --workdir /tmp -- /usr/bin/env true" in out
 
@@ -462,7 +466,8 @@ def test_show_json(install_backend, cli_privileges: None, capsys: pytest.Capture
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["name"] == "demo"
-    assert payload["recreate"].startswith("uniservice add demo")
+    # A system-scope service (everything on Windows) is prefixed with sudo.
+    assert "uniservice add demo" in payload["recreate"]
 
 
 # ---------------------------------------------------------------------------
@@ -471,32 +476,32 @@ def test_show_json(install_backend, cli_privileges: None, capsys: pytest.Capture
 
 
 def test_status_without_a_name_prints_an_overview(
-    install_backend, cli_privileges: None, capsys: pytest.CaptureFixture[str]
+    install_backend, cli_privileges: None, host_scope: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     install_backend(rows=[ServiceInfo("demo", True, True), ServiceInfo("api", True, False)])
 
     assert cli.main(["status"]) == OK
 
     out = capsys.readouterr().out
-    assert "user scope" in out
+    assert f"{host_scope} scope" in out
     assert "demo\tyes\tyes" in out
     assert "2 service(s), 1 running" in out
 
 
 def test_status_with_a_name_prints_a_header_then_the_native_output(
-    install_backend, cli_privileges: None, capsys: pytest.CaptureFixture[str]
+    install_backend, cli_privileges: None, host_scope: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     backend = install_backend(rows=[ServiceInfo("demo", True, True)])
 
     assert cli.main(["status", "demo"]) == OK
 
     out = capsys.readouterr().out
-    assert "demo · user scope · yes (running) · yes (enabled)" in out
+    assert f"demo · {host_scope} scope · yes (running) · yes (enabled)" in out
     assert backend.actions() == ["exists", "list_info", "status"]
 
 
 def test_status_flushes_our_header_before_the_native_output(
-    install_backend, cli_privileges: None, tty, monkeypatch: pytest.MonkeyPatch
+    install_backend, cli_privileges: None, host_scope: str, tty, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Regression: a buffered header used to surface after systemctl's output."""
     backend = install_backend(rows=[ServiceInfo("demo", True, True)])
@@ -506,7 +511,7 @@ def test_status_flushes_our_header_before_the_native_output(
 
     # The console colours the heading, so compare the printable text.
     lines = [strip_ansi(line) for line in tty.getvalue().splitlines()]
-    assert lines[0].startswith("demo · user scope")
+    assert lines[0].startswith(f"demo · {host_scope} scope")
     assert "native output" in lines
 
 

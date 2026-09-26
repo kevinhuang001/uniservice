@@ -64,6 +64,12 @@ presentation layer was rewritten.  The renames below are breaking: `cat` is now
 
 - `uniservice cat` and `uniservice uninstall` (see *Changed*).
 
+### Fixed
+
+- Two CLI tests hardcoded `user scope` and therefore failed only on the Windows
+  runners, which always derive `system`.  CI now repeats the Windows scope
+  derivation on every platform (`-p tests.system_scope_plugin`).
+
 ## [1.5.0] - 2026-09-21
 
 ### Added

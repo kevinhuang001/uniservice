@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from uniservice_lib.backends.base import Check, ServiceDefinition, ServiceInfo  # noqa: E402
 from uniservice_lib.logging_utils import logger  # noqa: E402
+from uniservice_lib.scope import Scope  # noqa: E402
 
 
 def completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -112,7 +113,10 @@ class FakeBackend:
         self._record("definition", name)
         return ServiceDefinition(
             name=name,
-            scope=self.scope.value if self.scope is not None else "user",
+            # Mirrors the real backends, which report the scope they were
+            # built with; the value comes from the host, not from a constant,
+            # so these tests behave the same on Windows (always "system").
+            scope=self.scope.value if self.scope is not None else Scope.from_env().value,
             location=f"/fake/{name}.unit",
             workdir="/tmp",
             command_parts=("/usr/bin/env", "true"),
@@ -228,6 +232,18 @@ class TtyStream(io.StringIO):
 
     def isatty(self) -> bool:
         return True
+
+
+@pytest.fixture
+def host_scope() -> str:
+    """The scope this host derives from its privileges.
+
+    Windows always derives ``system``, so a rendering test that hardcoded
+    ``user`` passed on Linux and macOS and failed there.
+    """
+    from uniservice_lib.scope import Scope
+
+    return Scope.from_env().value
 
 
 @pytest.fixture
