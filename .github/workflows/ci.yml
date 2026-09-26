@@ -150,12 +150,12 @@ jobs:
             # The installer removes it, not the command: a running image cannot
             # delete itself on Windows, and running the removal from another
             # process means it never has to.
-            $preview = ./install-windows.ps1 -Uninstall -DryRun -Prefix $prefix 2>&1 | Out-String
+            $preview = ./install-windows.ps1 -Uninstall -DryRun -Prefix $prefix *>&1 | Out-String
             Write-Host $preview
             if ($preview -notmatch 'Would remove:') { throw "expected a preview, got:`n$preview" }
             if (-not (Test-Path -LiteralPath $exe)) { throw '-DryRun removed the .exe' }
 
-            $output = ./install-windows.ps1 -Uninstall -Prefix $prefix 2>&1 | Out-String
+            $output = ./install-windows.ps1 -Uninstall -Prefix $prefix *>&1 | Out-String
             Write-Host $output
             if ($LASTEXITCODE -ne 0) { throw "uninstall exited $LASTEXITCODE`n$output" }
             if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind`n$output" }
@@ -183,7 +183,7 @@ jobs:
             & $shim --version
             # The .cmd shim and the .pyz are both read while they run, which is
             # exactly why the removal is the installer's job.
-            $output = ./install-windows.ps1 -Uninstall -Prefix $prefix 2>&1 | Out-String
+            $output = ./install-windows.ps1 -Uninstall -Prefix $prefix *>&1 | Out-String
             Write-Host $output
             if ($LASTEXITCODE -ne 0) { throw "uninstall exited $LASTEXITCODE`n$output" }
             if (Test-Path -LiteralPath $prefix) { throw "uninstall left $prefix behind`n$output" }
