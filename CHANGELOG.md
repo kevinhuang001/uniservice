@@ -5,6 +5,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-21
+
+The command line was redesigned around what each command *acts on*, and the
+presentation layer was rewritten.  The renames below are breaking: `cat` is now
+`show`, and `uninstall` moved under `self`.
+
+### Added
+
+- `uniservice restart NAME...` - one native restart (a single `systemctl restart`
+  where available) instead of a stop that can leave a service unsupervised.
+- `uniservice doctor` - checks the interpreter, the platform, the privileges, the
+  installation and the log file, then asks the backend to probe the native
+  supervisor: `systemctl is-system-running` (the check that fails inside a
+  container that was never booted with systemd), the launchd domains, or the Task
+  Scheduler.  Non-fatal findings are warnings.  `--json` for tooling.
+- `uniservice version` - the versions of uniservice, Python, the platform, the
+  installation and the log file, in the form a bug report wants.
+- `uniservice self info` - where this copy lives, how it was installed, and which
+  files the installer wrote.
+- `uniservice status` without a name - the table plus a summary line.
+- `uniservice list --table|--json|--quiet`, `--color=auto|always|never`,
+  `--ascii`, `-v/--verbose`, and `-n/--lines` for `logs`.
+- Aliases: `ls` for `list`, `rm` for `remove`.
+- Every control verb accepts several names and reports each one, exiting non-zero
+  if any failed.
+
+### Changed
+
+- `uniservice cat NAME` is now `uniservice show NAME`.  It renders a labelled
+  block (command, working directory, definition file) plus the `add` command that
+  recreates the service, and `--json` returns the same fields.  `cat` collided
+  with the Unix tool and never concatenated anything.
+- `uniservice uninstall` is now `uniservice self uninstall`.  It manages the
+  installation, not a service, so it no longer sits next to `list`.
+- `uniservice list` draws an aligned, coloured table on a terminal while keeping
+  the tab separated `NAME/ENABLED/RUNNING` contract byte-for-byte when piped, so
+  existing scripts are unaffected.
+- Usage errors exit with **2** instead of **1**, and failures are reported as a
+  red `✘` line instead of a `FAIL:` prefix.
+- The native tools' routine chatter is gone: `enable`/`start`/`stop`/`restart`
+  capture it and only surface it when the command actually fails.
+- Backends describe instead of print: `cat()` became `definition()` returning a
+  `ServiceDefinition`, and new `checks()`, `command_line()` and `restart()`
+  methods carry the platform-specific knowledge.  Only `status()` and `logs()`
+  still hand the terminal to the native tool, because there its output is the
+  answer.
+- `uniservice_lib` is now split into `parser`, `console`, `exitcodes` and a
+  `commands/` package, so the entry point only parses, dispatches and maps
+  failures to exit codes.
+- The wheel discovers subpackages with `[tool.setuptools.packages.find]`, so a
+  new subpackage cannot be forgotten and ship a broken console script.
+- Colours are decided once per run: `NO_COLOR`, `TERM=dumb` and a redirected
+  stdout all disable them; a console that cannot encode Unicode falls back to
+  ASCII marks.
+
+### Removed
+
+- `uniservice cat` and `uniservice uninstall` (see *Changed*).
+
 ## [1.5.0] - 2026-09-21
 
 ### Added

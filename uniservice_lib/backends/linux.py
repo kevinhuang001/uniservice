@@ -11,18 +11,32 @@ from ..logging_utils import logger
 from ..naming import SYSTEMD_UNIT_PREFIX, SYSTEMD_UNIT_SUFFIX, parse_systemd_unit_name, systemd_unit_name
 from ..process import command_string, run
 from ..scope import Scope
-from .base import Backend, ServiceInfo, classify_state
+from .base import (
+    Backend,
+    Check,
+    ServiceDefinition,
+    ServiceInfo,
+    classify_state,
+    directory_check,
+    first_token,
+    tool_check,
+)
 
 __all__ = [
     "SYSTEMD_ACTIVE_STATES",
     "SYSTEMD_DISABLED_STATES",
     "SYSTEMD_ENABLED_STATES",
+    "SYSTEMD_HEALTHY_STATES",
     "SYSTEMD_INACTIVE_STATES",
     "LinuxBackend",
     "collect_unit_names",
     "systemctl_command",
     "systemd_root",
 ]
+
+#: ``systemctl is-system-running`` results that mean the manager can run units.
+#: ``degraded`` means some other unit failed, which does not stop ours.
+SYSTEMD_HEALTHY_STATES = frozenset({"running", "degraded"})
 
 #: ``systemctl is-enabled`` results that mean "starts on boot".
 SYSTEMD_ENABLED_STATES = frozenset({"enabled", "enabled-runtime"})
@@ -137,8 +151,8 @@ class LinuxBackend(Backend):
         unit_path.write_text(content, encoding="utf-8")
         logger.debug("linux wrote unit %s", unit_path)
 
-    def cat(self, name: str) -> None:
-        logger.info("linux cat name=%s", name)
+    def definition(self, name: str) -> ServiceDefinition:
+        logger.info("linux definition name=%s", name)
         unit_path = self._unit_path(name)
         if not unit_path.exists():
             raise ServiceNotFoundError(name)
@@ -157,9 +171,13 @@ class LinuxBackend(Backend):
             raise UniserviceError(f"Unsupported ExecStart format: {exec_start}")
 
         command_tokens = shlex.split(tokens[index + 1])
-        quoted_command = " ".join(shlex.quote(token) for token in command_tokens)
-        prefix = "sudo " if self.scope.is_system else ""
-        print(f"{prefix}uniservice add {shlex.quote(name)} --workdir {shlex.quote(workdir)} -- {quoted_command}")
+        return ServiceDefinition(
+            name=name,
+            scope=self.scope.value,
+            location=str(unit_path),
+            workdir=workdir,
+            command_parts=tuple(command_tokens),
+        )
 
     def status(self, name: str) -> None:
         logger.info("linux status name=%s", name)
@@ -196,25 +214,33 @@ class LinuxBackend(Backend):
     def enable(self, name: str) -> None:
         logger.info("linux enable name=%s", name)
         base = self._systemctl()
-        run([*base, "daemon-reload"])
-        run([*base, "enable", systemd_unit_name(name)])
+        run([*base, "daemon-reload"], capture=True)
+        run([*base, "enable", systemd_unit_name(name)], capture=True)
 
     def disable(self, name: str) -> None:
         logger.info("linux disable name=%s", name)
         base = self._systemctl()
-        run([*base, "daemon-reload"])
-        run([*base, "disable", systemd_unit_name(name)])
+        run([*base, "daemon-reload"], capture=True)
+        run([*base, "disable", systemd_unit_name(name)], capture=True)
         run([*base, "reset-failed", systemd_unit_name(name)], check=False, capture=True)
 
     def start(self, name: str) -> None:
         logger.info("linux start name=%s", name)
         base = self._systemctl()
-        run([*base, "daemon-reload"])
-        run([*base, "start", systemd_unit_name(name)])
+        run([*base, "daemon-reload"], capture=True)
+        run([*base, "start", systemd_unit_name(name)], capture=True)
 
     def stop(self, name: str) -> None:
         logger.info("linux stop name=%s", name)
-        run([*self._systemctl(), "stop", systemd_unit_name(name)])
+        run([*self._systemctl(), "stop", systemd_unit_name(name)], capture=True)
+
+    def restart(self, name: str) -> None:
+        # systemd restarts the unit in one transaction, so a crashed service
+        # does not leave a window where it is stopped and unsupervised.
+        logger.info("linux restart name=%s", name)
+        base = self._systemctl()
+        run([*base, "daemon-reload"], capture=True)
+        run([*base, "restart", systemd_unit_name(name)], capture=True)
 
     def remove(self, name: str) -> None:
         logger.info("linux remove name=%s", name)
@@ -256,6 +282,39 @@ class LinuxBackend(Backend):
                 )
             )
         return rows
+
+    def checks(self) -> list[Check]:
+        """Probe systemd for ``uniservice doctor``."""
+        checks = [
+            tool_check(SYSTEMCTL, hint="systemd is required on Linux; install your distribution's systemd package"),
+            tool_check(JOURNALCTL, hint="ships with systemd; `uniservice logs` needs it"),
+        ]
+        if shutil.which(SYSTEMCTL):
+            state = self._manager_state()
+            checks.append(
+                Check(
+                    label="systemd manager",
+                    ok=state in SYSTEMD_HEALTHY_STATES,
+                    detail=f"{state or 'no answer'} ({' '.join(self._systemctl())} is-system-running)",
+                    hint=(
+                        "the unit cannot be supervised here; in a container start systemd "
+                        "(or pass --scope through a host that runs it)"
+                    ),
+                )
+            )
+        checks.append(
+            directory_check(
+                systemd_root(self.scope),
+                label="unit directory",
+                hint="uniservice must be able to write the unit file",
+            )
+        )
+        return checks
+
+    def _manager_state(self) -> str:
+        """Return ``systemctl is-system-running``'s verdict for this scope."""
+        completed = run([*self._systemctl(), "is-system-running"], check=False, capture=True)
+        return first_token(completed.stdout or "", completed.stderr or "")
 
     @staticmethod
     def _query(base: list[str], verb: str, unit: str) -> tuple[str, str]:

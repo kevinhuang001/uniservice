@@ -16,6 +16,7 @@ import os
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..errors import ServiceNotFoundError, UniserviceError
@@ -23,7 +24,16 @@ from ..logging_utils import logger
 from ..naming import parse_windows_task_name, windows_task_name
 from ..platform_utils import is_admin_windows, win_cmdline_split
 from ..process import run
-from .base import Backend, ServiceInfo, classify_state, clear_files
+from .base import (
+    Backend,
+    Check,
+    ServiceDefinition,
+    ServiceInfo,
+    classify_state,
+    clear_files,
+    directory_check,
+    tool_check,
+)
 
 __all__ = [
     "WINDOWS_NOT_RUNNING_STATES",
@@ -194,6 +204,33 @@ class WindowsBackend(Backend):
     def _task_name(self, name: str) -> str:
         return windows_task_name(name)
 
+    def command_line(self, parts: Sequence[str]) -> str:
+        """Render *parts* with the quoting ``cmd.exe`` expects."""
+        return subprocess.list2cmdline(list(parts))
+
+    def checks(self) -> list[Check]:
+        """Probe the Task Scheduler for ``uniservice doctor``."""
+        elevated = is_admin_windows()
+        return [
+            tool_check(SCHTASKS, hint="schtasks.exe ships with Windows"),
+            tool_check(
+                POWERSHELL,
+                hint="used for locale-independent task state; schtasks.exe is the fallback",
+                fatal=False,
+            ),
+            Check(
+                label="administrator",
+                ok=elevated,
+                detail="elevated" if elevated else "not elevated",
+                hint="Scheduled Tasks managed by uniservice run as SYSTEM, which needs an Administrator shell",
+            ),
+            directory_check(
+                win_log_dir(),
+                label="log directory",
+                hint="captured stdout/stderr are written there",
+            ),
+        ]
+
     def create(self, name: str, workdir: Path, command_parts: list[str]) -> None:
         logger.info("windows create name=%s workdir=%s", name, workdir)
         self._require_admin()
@@ -219,8 +256,8 @@ class WindowsBackend(Backend):
             capture=True,
         )
 
-    def cat(self, name: str) -> None:
-        logger.info("windows cat name=%s", name)
+    def definition(self, name: str) -> ServiceDefinition:
+        logger.info("windows definition name=%s", name)
         self._require_admin()
         task_name = self._task_name(name)
         completed = run([SCHTASKS, "/Query", "/TN", task_name, "/XML"], check=False, capture=True)
@@ -244,12 +281,20 @@ class WindowsBackend(Backend):
 
         workdir, cmdline = _split_task_action(command, arguments)
         if workdir and cmdline:
-            argv = win_cmdline_split(cmdline)
-            quoted = subprocess.list2cmdline(argv)
-            print(f'uniservice add "{name}" --workdir "{workdir}" -- {quoted}')
-            return
-
-        print(f"{command} {arguments}")
+            return ServiceDefinition(
+                name=name,
+                scope=self.scope.value,
+                location=task_name,
+                workdir=workdir,
+                command_parts=tuple(win_cmdline_split(cmdline)),
+            )
+        return ServiceDefinition(
+            name=name,
+            scope=self.scope.value,
+            location=task_name,
+            workdir="",
+            raw=f"{command} {arguments}",
+        )
 
     def status(self, name: str) -> None:
         logger.info("windows status name=%s", name)

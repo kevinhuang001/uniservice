@@ -162,5 +162,5 @@ def test_remove_installation_reports_a_permission_problem(tmp_path: Path, monkey
 
     monkeypatch.setattr(Path, "unlink", deny)
 
-    with pytest.raises(UniserviceError, match="run 'sudo uniservice uninstall'"):
+    with pytest.raises(UniserviceError, match=r"run 'sudo uniservice self uninstall'"):
         remove_installation(installation)

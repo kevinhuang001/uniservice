@@ -62,8 +62,10 @@ def resolve_command_parts(command_parts: list[str]) -> list[str]:
     """Resolve a relative executable to an absolute path when possible.
 
     The native supervisors do not inherit the interactive shell's ``PATH`` in a
-    predictable way, so a command that is not an absolute path is resolved here
-    and a warning is logged.  Unresolvable commands are returned unchanged.
+    predictable way, so a command that is not an absolute path is resolved here.
+    A successful resolution is recorded at ``INFO`` (visible with ``-v``) since
+    it already made the service work; only a command we could *not* resolve is a
+    warning, because that one is likely to fail when the service starts.
     """
     if not command_parts:
         return command_parts
@@ -74,7 +76,7 @@ def resolve_command_parts(command_parts: list[str]) -> list[str]:
 
     resolved = shutil.which(executable)
     if resolved:
-        logger.warning('Command "%s" is not an absolute path; resolved to "%s"', executable, resolved)
+        logger.info('Command "%s" is not an absolute path; resolved to "%s"', executable, resolved)
         return [resolved, *command_parts[1:]]
 
     logger.warning('Command "%s" is not an absolute path and was not found in PATH', executable)

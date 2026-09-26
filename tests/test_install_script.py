@@ -13,6 +13,7 @@ real standalone binaries are smoke tested by the ``binaries`` job in CI.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -190,14 +191,14 @@ def test_from_detects_a_standalone_binary(tmp_path: Path) -> None:
     assert manifest_of(prefix)["kind"] == "binary"
 
 
-def test_uninstall_subcommand_removes_the_installation(tmp_path: Path) -> None:
-    """`uniservice uninstall` must undo what install.sh did, including itself."""
+def test_self_uninstall_removes_the_installation(tmp_path: Path) -> None:
+    """`uniservice self uninstall` must undo what install.sh did, including itself."""
     prefix = tmp_path / "pfx"
     zipapp = build_zipapp(tmp_path / "dist" / "uniservice")
     assert run_installer("--prefix", str(prefix), "--from", str(zipapp)).returncode == 0
 
     completed = subprocess.run(
-        [sys.executable, str(prefix / "bin" / "uniservice"), "uninstall"],
+        [sys.executable, str(prefix / "bin" / "uniservice"), "self", "uninstall"],
         capture_output=True,
         text=True,
         check=False,
@@ -205,8 +206,29 @@ def test_uninstall_subcommand_removes_the_installation(tmp_path: Path) -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "Removed uniservice" in completed.stdout
+    assert "removed uniservice" in completed.stdout
     assert not prefix.exists()
+
+
+def test_self_info_describes_the_installation(tmp_path: Path) -> None:
+    """The manifest is the source of truth for `uniservice self info`."""
+    prefix = tmp_path / "pfx"
+    zipapp = build_zipapp(tmp_path / "dist" / "uniservice")
+    assert run_installer("--prefix", str(prefix), "--from", str(zipapp)).returncode == 0
+
+    completed = subprocess.run(
+        [sys.executable, str(prefix / "bin" / "uniservice"), "self", "info", "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["prefix"] == str(prefix)
+    assert payload["kind"] == "zipapp"
+    assert payload["version"]
 
 
 def test_uninstall_leaves_a_prefix_that_holds_other_files(tmp_path: Path) -> None:

@@ -95,7 +95,7 @@ mode of its own — for a system-wide uv install you would have to redirect `UV_
 which is why pipx and the installer are the two supported ways to get `/usr/local/bin/uniservice`.
 
 Uninstall with the frontend that installed it — `pipx uninstall uniservice` or
-`uv tool uninstall uniservice`. `uniservice uninstall` refuses to touch a copy it did not install
+`uv tool uninstall uniservice`. `uniservice self uninstall` refuses to touch a copy it did not install
 and tells you so.
 
 ### Installer options
@@ -158,6 +158,33 @@ uniservice --help
 
 ## Usage
 
+```
+uniservice <command> [options]
+```
+
+| Command | What it does |
+| --- | --- |
+| `list`, `ls` | list the services uniservice manages |
+| `add NAME -- COMMAND...` | create, enable and start a service |
+| `start`, `stop`, `restart NAME...` | change the running state |
+| `enable`, `disable NAME...` | change whether it starts at boot |
+| `remove`, `rm NAME...` | stop, disable and delete a service |
+| `status [NAME]` | the native status of `NAME`, or a table of everything |
+| `logs NAME [-f]` | print the captured output |
+| `show NAME` | how the service is defined, and how to recreate it |
+| `self info`, `self uninstall` | manage the uniservice installation itself |
+| `doctor` | check this machine end to end |
+| `version` | print component versions |
+
+Every control verb takes **one or more** names and reports each one, so
+`uniservice restart api worker` is a single command; it exits non-zero if any of
+them failed.
+
+The installation commands live under `self` on purpose. `uniservice remove NAME`
+deletes a *service*; `uniservice self uninstall` deletes *uniservice*. Saying so
+in the command tree keeps `uniservice --help` from reading as if the two were
+neighbours.
+
 ### Scope (macOS/Linux)
 
 The scope is derived from your privileges, not from a flag:
@@ -186,10 +213,10 @@ command needs an **Administrator** PowerShell/CMD.
 uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
-- If the executable is not an absolute path, uniservice will try to resolve it from PATH and print a WARNING.
+- If the executable is not an absolute path, uniservice resolves it from `PATH` (visible with `-v`).
 - If `--workdir` is not provided, the command runs in the current directory.
-- If a service with the same name already exists, uniservice will ask whether to overwrite it.
-- `add` performs `enable` + `start`.
+- If a service with the same name already exists, uniservice asks whether to overwrite it.
+- `add` performs `enable` + `start`, then prints the command, the working directory and the file it wrote.
 
 Service names must not contain `/`, `\`, control characters or NUL, must not be `.`/`..`, and must not start with `-`
 (those characters would escape the definition directory or break the native definition format).
@@ -197,10 +224,13 @@ Service names must not contain `/`, `\`, control characters or NUL, must not be 
 ### List
 
 ```bash
-uniservice list
+uniservice list              # a table on a terminal, TSV when piped
+uniservice list --table      # force the table down a pipe:  uniservice list --table | less
+uniservice list --json       # machine readable
+uniservice list --quiet      # names only
 ```
 
-Output is TSV (tab-separated), sorted by name:
+The table has three columns:
 
 | Column | Meaning |
 | --- | --- |
@@ -210,45 +240,120 @@ Output is TSV (tab-separated), sorted by name:
 
 `?` means the platform did not give a definitive answer (for example `systemctl` is missing, the launchd override
 query failed, or a unit is in a transitional state). It is never a guess. Names containing control characters are
-sanitised and duplicate rows are collapsed, so the output always stays valid TSV.
+sanitised and duplicate rows are collapsed, so the TSV form always stays valid.
+
+When stdout is not a terminal the output is exactly the tab-separated
+`NAME<TAB>ENABLED<TAB>RUNNING` contract, header included, so existing scripts keep
+working unchanged.
 
 ### Control
 
 ```bash
-uniservice enable  demo
 uniservice start   demo
 uniservice stop    demo
+uniservice restart demo        # one native restart, not stop + start
+uniservice enable  demo        # start at boot/login
 uniservice disable demo
+uniservice restart api worker  # several at once
 ```
 
 ### Status and logs
 
 ```bash
-uniservice status demo
-uniservice logs   demo --lines 200
-uniservice logs   demo --follow      # or -f
+uniservice status              # a table of everything, with a summary line
+uniservice status demo         # uniservice's verdict, then the native tool's own output
+uniservice logs   demo         # last 200 lines
+uniservice logs   demo -n 50
+uniservice logs   demo -f      # follow
 ```
+
+`status NAME` and `logs NAME` hand the terminal to the native tool on purpose: its output *is*
+the answer, and reformatting `systemctl status` or `journalctl` would only lose detail.
+
+### Show
+
+```bash
+uniservice show demo
+```
+
+```
+demo · user scope
+  command   /usr/bin/python3 -m http.server 8000
+  workdir   /srv/demo
+  location  /home/me/.config/systemd/user/uniservice-demo.service
+
+recreate it with:
+  uniservice add demo --workdir /srv/demo -- /usr/bin/python3 -m http.server 8000
+```
+
+`--json` gives the same fields, `recreate` included.
 
 ### Remove
 
 ```bash
 uniservice remove demo
+uniservice rm demo api         # stop, disable and delete several
 ```
 
 `remove` performs `stop` + `disable` before deleting the definition.
 
-### Cat
+### Self
 
 ```bash
-uniservice cat demo
+uniservice self info            # where this copy lives, how it was installed
+uniservice self uninstall       # remove the command again
+uniservice self uninstall --dry-run
 ```
 
-Prints an equivalent `uniservice add ...` command for the service.
+### Doctor and version
+
+```bash
+uniservice doctor
+```
+
+```
+uniservice doctor
+  ✔ python           3.13.5 (/usr/bin/python3)
+  ✔ platform         linux (linux)
+  ✔ privileges       normal user · user scope
+  ✔ installation     not managed by install.sh; that is fine for pipx, uv or a source checkout
+  ✔ log file         /home/me/.uniservice/logs/uniservice.log
+  ✔ systemctl        /usr/bin/systemctl
+  ✔ journalctl       /usr/bin/journalctl
+  ✔ systemd manager  running (systemctl --user is-system-running)
+  ✔ unit directory   /home/me/.config/systemd/user
+
+all good
+```
+
+`doctor` checks the interpreter, the platform, the privileges, the installation
+and the log file, then asks the backend to probe the native supervisor: systemd
+(including `is-system-running`, which is what fails inside a container that was
+never booted with systemd), launchd's domains, or the Task Scheduler. A failing
+check that is not fatal — an optional tool, an unwritable log file — is reported
+as a warning and does not change the exit code.
+
+`uniservice version` prints the versions of the pieces instead, and is what to
+paste into a bug report.
+
+### Output rules
+
+| Flag | Effect |
+| --- | --- |
+| `--color=auto\|always\|never` | colour; `auto` is a terminal with `NO_COLOR` unset and `TERM` not `dumb` |
+| `--ascii` | ASCII status marks and rules instead of `✔ ✘ • ─` |
+| `--json` | one JSON document on stdout where the command supports it |
+| `-q`, `--quiet` | only failures; `list` prints bare names |
+| `-v`, `--verbose` | debug logging on stderr |
+
+Colour and Unicode are decided once per run, so a redirected stdout never gets
+ANSI escapes, and a Windows console on a legacy code page falls back to the ASCII
+alphabet automatically.
 
 ## Logging
 
-- Console: WARNING and above
-- File: DEBUG and above
+- Console: WARNING and above (`-v` lowers it to DEBUG), prefixed with `uniservice:`
+- File: DEBUG and above, with timestamps
 - Log file:
   - macOS/Linux: `~/.uniservice/logs/uniservice.log`
   - Windows: `%LOCALAPPDATA%\uniservice\logs\uniservice.log`
@@ -258,16 +363,25 @@ Prints an equivalent `uniservice add ...` command for the service.
 ```
 uniservice                  executable entry point (thin launcher, and what the zipapp runs)
 uniservice_lib/
-  cli.py                    argument parsing and command dispatch
+  cli.py                    entry point: parse, build the Context, dispatch, exit codes
+  parser.py                 the command tree and the grouped help text
+  console.py                the display layer: tty/colour/Unicode, tables, JSON
+  exitcodes.py              exit code constants
+  commands/
+    __init__.py             Context: console + scope + backend, and the privilege rules
+    service.py              list, add, start/stop/restart, enable/disable, remove, status, logs, show
+    selfcmd.py              self info, self uninstall
+    diagnostics.py          doctor, version
   scope.py                  user vs. system scope
   naming.py                 service-name validation and native definition names
   process.py                subprocess helpers
   platform_utils.py         platform and privilege detection
   logging_utils.py          console + file logging
   errors.py                 exception hierarchy
+  installation.py           the manifest an installer leaves behind
   backends/
     __init__.py             backend selection
-    base.py                 Backend interface, ServiceInfo, state parsing
+    base.py                 Backend interface, ServiceInfo, ServiceDefinition, Check
     linux.py                systemd units
     macos.py                launchd jobs
     windows.py              Scheduled Tasks
@@ -282,6 +396,10 @@ tests/                      pytest suite (unit, end-to-end, installer, opt-in in
 
 Each backend implements the same `Backend` interface, so adding a platform means adding one module and registering it
 in `uniservice_lib/backends/__init__.py`.
+
+Backends **return data** and the display layer renders it: `definition()` describes a service, `checks()` describes the
+environment, `command_line()` spells a command the way the platform's shell needs. The only two methods that print are
+`status()` and `logs()`, because there the native tool's own output is the answer.
 
 ## Development
 
@@ -326,8 +444,8 @@ Windows, and builds the standalone binary for five targets. Pushing a `v*` tag r
 `uniservice` removes itself:
 
 ```bash
-sudo uniservice uninstall        # or: uniservice uninstall, for a --prefix install
-uniservice uninstall --dry-run   # show what would be removed first
+sudo uniservice self uninstall        # or: uniservice self uninstall, for a --prefix install
+uniservice self uninstall --dry-run   # show what would be removed first
 ```
 
 It reads the manifest its installer wrote (`/usr/local/lib/uniservice/manifest`), deletes exactly

@@ -283,17 +283,19 @@ def test_cat_round_trips_the_add_command(
     fake_runner(linux)
     backend.create("demo", workdir, ["/usr/bin/python3", "-m", "http.server", "8000"])
 
-    backend.cat("demo")
+    definition = backend.definition("demo")
 
-    output = capsys.readouterr().out.strip()
-    assert output.startswith("uniservice add demo --workdir ")
-    assert str(workdir) in output
-    assert output.endswith("-- /usr/bin/python3 -m http.server 8000")
+    assert definition.name == "demo"
+    assert definition.scope == "user"
+    assert definition.workdir == str(workdir)
+    assert definition.command_parts == ("/usr/bin/python3", "-m", "http.server", "8000")
+    assert definition.raw == ""
+    assert definition.location.endswith("uniservice-demo.service")
 
 
-def test_cat_rejects_a_missing_service(backend: LinuxBackend, unit_root: Path) -> None:
+def test_definition_rejects_a_missing_service(backend: LinuxBackend, unit_root: Path) -> None:
     with pytest.raises(ServiceNotFoundError):
-        backend.cat("nope")
+        backend.definition("nope")
 
 
 def test_exists_reflects_the_unit_file(backend: LinuxBackend, unit_root: Path) -> None:
@@ -486,3 +488,72 @@ def test_disable_resets_failed_units(
 
     assert runner.commands_matching("--user", "disable", "uniservice-demo.service")
     assert runner.commands_matching("--user", "reset-failed", "uniservice-demo.service")
+
+
+# ---------------------------------------------------------------------------
+# doctor checks
+# ---------------------------------------------------------------------------
+
+
+def test_checks_report_a_healthy_systemd(
+    backend: LinuxBackend,
+    unit_root: Path,
+    fake_which: Callable[..., None],
+    fake_runner: Callable[..., FakeRunner],
+) -> None:
+    fake_which(linux, "systemctl", "journalctl")
+    runner = fake_runner(linux)
+    runner.add_command("is-system-running", stdout="running\n")
+
+    checks = {check.label: check for check in backend.checks()}
+
+    assert checks["systemctl"].ok
+    assert checks["journalctl"].ok
+    assert checks["systemd manager"].ok
+    assert "running" in checks["systemd manager"].detail
+    assert checks["unit directory"].ok
+
+
+def test_checks_accept_a_degraded_manager(
+    backend: LinuxBackend,
+    unit_root: Path,
+    fake_which: Callable[..., None],
+    fake_runner: Callable[..., FakeRunner],
+) -> None:
+    """`degraded` means another unit failed; ours can still run."""
+    fake_which(linux, "systemctl", "journalctl")
+    runner = fake_runner(linux)
+    runner.add_command("is-system-running", stdout="degraded\n")
+
+    checks = {check.label: check for check in backend.checks()}
+    assert checks["systemd manager"].ok
+
+
+def test_checks_fail_when_the_manager_is_offline(
+    backend: LinuxBackend,
+    unit_root: Path,
+    fake_which: Callable[..., None],
+    fake_runner: Callable[..., FakeRunner],
+) -> None:
+    fake_which(linux, "systemctl", "journalctl")
+    runner = fake_runner(linux)
+    runner.add_command("is-system-running", stdout="offline\n")
+
+    checks = {check.label: check for check in backend.checks()}
+    assert checks["systemd manager"].ok is False
+    assert checks["systemd manager"].fatal is True
+    assert checks["systemd manager"].hint
+
+
+def test_checks_report_missing_tools(
+    backend: LinuxBackend,
+    unit_root: Path,
+    fake_which: Callable[..., None],
+) -> None:
+    fake_which(linux)
+
+    checks = {check.label: check for check in backend.checks()}
+    assert checks["systemctl"].ok is False
+    assert checks["journalctl"].ok is False
+    # No systemctl means there is nothing to ask about the manager.
+    assert "systemd manager" not in checks

@@ -19,6 +19,7 @@ from uniservice_lib.backends.windows import (
     win_build_tr,
     win_log_dir,
 )
+from uniservice_lib.commands import service
 from uniservice_lib.errors import ServiceNotFoundError, UniserviceError
 from uniservice_lib.scope import Scope
 
@@ -313,7 +314,7 @@ def test_remove_is_forced(
     assert runner.commands_matching("schtasks.exe", "/Delete", "uniservice-demo", "/F")
 
 
-def test_cat_round_trips_the_add_command(
+def test_definition_round_trips_the_task_action(
     backend: WindowsBackend,
     monkeypatch: pytest.MonkeyPatch,
     fake_runner: Callable[..., FakeRunner],
@@ -332,14 +333,20 @@ def test_cat_round_trips_the_add_command(
     runner = fake_runner(windows)
     runner.add_command("schtasks.exe", "/XML", stdout=xml)
 
-    backend.cat("demo")
+    definition = backend.definition("demo")
 
-    output = capsys.readouterr().out.strip()
-    assert output.startswith('uniservice add "demo" --workdir "C:\\tmp" -- ')
-    assert "http.server 8000" in output
+    assert definition.name == "demo"
+    assert definition.workdir == "C:\\tmp"
+    assert definition.command_parts == ("C:\\python.exe", "-m", "http.server", "8000")
+    assert definition.location.endswith("demo")
+    # Windows has its own quoting rules for the recreate command.
+    line = service.render_add_command(definition, command_line=backend.command_line, windows=True)
+    assert line.startswith("uniservice add demo --workdir")
+    # Windows never prefixes sudo, even for a SYSTEM service.
+    assert "sudo" not in line
 
 
-def test_cat_requires_the_task_to_exist(
+def test_definition_requires_the_task_to_exist(
     backend: WindowsBackend,
     monkeypatch: pytest.MonkeyPatch,
     fake_runner: Callable[..., FakeRunner],
@@ -349,7 +356,7 @@ def test_cat_requires_the_task_to_exist(
     runner.add_command("schtasks.exe", "/XML", returncode=1, stderr="not found")
 
     with pytest.raises(ServiceNotFoundError):
-        backend.cat("demo")
+        backend.definition("demo")
 
 
 def test_start_detects_a_non_zero_last_result(
@@ -538,3 +545,41 @@ def test_task_enabled_returns_none_when_the_xml_query_fails(
     runner.add_command("schtasks.exe", "/XML", returncode=1)
 
     assert backend._task_enabled("demo") is None
+
+
+# ---------------------------------------------------------------------------
+# doctor checks
+# ---------------------------------------------------------------------------
+
+
+def test_checks_report_an_elevated_host(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
+    monkeypatch.setattr(
+        "uniservice_lib.backends.base.shutil.which",
+        lambda name: f"C:\\Windows\\{name}",
+    )
+
+    checks = {check.label: check for check in backend.checks()}
+
+    assert checks["schtasks.exe"].ok
+    assert checks["powershell.exe"].ok
+    assert checks["administrator"].ok
+    assert checks["log directory"].ok
+
+
+def test_checks_warn_about_an_unelevated_host(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: False)
+    monkeypatch.setattr("uniservice_lib.backends.base.shutil.which", lambda name: None)
+
+    checks = {check.label: check for check in backend.checks()}
+
+    assert checks["administrator"].ok is False
+    assert checks["administrator"].hint
+    # PowerShell is only a nicer way to read the task state, never required.
+    assert checks["powershell.exe"].fatal is False

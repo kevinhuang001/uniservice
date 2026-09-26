@@ -7,9 +7,17 @@ import sys
 from ..errors import UnsupportedPlatformError
 from ..platform_utils import LINUX, MACOS, WINDOWS, platform
 from ..scope import Scope
-from .base import Backend, ServiceInfo, classify_state, first_token
+from .base import Backend, Check, ServiceDefinition, ServiceInfo, classify_state, first_token
 
-__all__ = ["Backend", "ServiceInfo", "classify_state", "first_token", "get_backend"]
+__all__ = [
+    "Backend",
+    "Check",
+    "ServiceDefinition",
+    "ServiceInfo",
+    "classify_state",
+    "first_token",
+    "get_backend",
+]
 
 
 def get_backend(scope: Scope) -> Backend:

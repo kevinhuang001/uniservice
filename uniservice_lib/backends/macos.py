@@ -22,7 +22,7 @@ from ..naming import (
 from ..platform_utils import is_root_unix, sudo_target_uid, user_home_for_uid
 from ..process import command_string, run
 from ..scope import Scope
-from .base import Backend, ServiceInfo, clear_files
+from .base import Backend, Check, ServiceDefinition, ServiceInfo, clear_files, directory_check, tool_check
 
 __all__ = [
     "MacOSBackend",
@@ -264,8 +264,8 @@ class MacOSBackend(Backend):
         if self.scope.is_system:
             os.chmod(plist_path, 0o644)
 
-    def cat(self, name: str) -> None:
-        logger.info("mac cat name=%s", name)
+    def definition(self, name: str) -> ServiceDefinition:
+        logger.info("mac definition name=%s", name)
         plist_path = self._plist_path(name)
         if not plist_path.exists():
             raise ServiceNotFoundError(name)
@@ -280,10 +280,13 @@ class MacOSBackend(Backend):
         if not isinstance(command, str):
             raise UniserviceError(f"Invalid plist: {plist_path}")
 
-        command_tokens = shlex.split(command)
-        quoted_command = " ".join(shlex.quote(token) for token in command_tokens)
-        prefix = "sudo " if self.scope.is_system else ""
-        print(f"{prefix}uniservice add {shlex.quote(name)} --workdir {shlex.quote(workdir)} -- {quoted_command}")
+        return ServiceDefinition(
+            name=name,
+            scope=self.scope.value,
+            location=str(plist_path),
+            workdir=workdir,
+            command_parts=tuple(shlex.split(command)),
+        )
 
     def status(self, name: str) -> None:
         logger.info("mac status name=%s", name)
@@ -372,8 +375,8 @@ class MacOSBackend(Backend):
 
         label = self._label(name)
         domain = self._bootstrap(label, plist_path)
-        run([LAUNCHCTL, "enable", f"{domain}/{label}"], check=False)
-        run([LAUNCHCTL, "kickstart", "-k", f"{domain}/{label}"], check=False)
+        run([LAUNCHCTL, "enable", f"{domain}/{label}"], check=False, quiet=True)
+        run([LAUNCHCTL, "kickstart", "-k", f"{domain}/{label}"], check=False, quiet=True)
 
     def stop(self, name: str) -> None:
         logger.info("mac stop name=%s", name)
@@ -424,6 +427,41 @@ class MacOSBackend(Backend):
                 )
             )
         return rows
+
+    def checks(self) -> list[Check]:
+        """Probe launchd for ``uniservice doctor``."""
+        checks = [
+            tool_check(LAUNCHCTL, hint="launchctl ships with macOS"),
+            tool_check(PGREP, hint="used to detect a running job; without it `list` falls back to launchctl"),
+        ]
+        checks.append(
+            directory_check(
+                macos_plist_root(self.scope),
+                label="plist directory",
+                hint="uniservice must be able to write the job definition",
+            )
+        )
+        domain = self._reachable_domain()
+        checks.append(
+            Check(
+                label="launchd domain",
+                ok=bool(domain),
+                detail=domain or f"none of {', '.join(self._domains())} answered",
+                hint=(
+                    "the job cannot be supervised here; a user-scope install needs a GUI login "
+                    "session (launchctl bootstrap gui/<uid>)"
+                ),
+            )
+        )
+        return checks
+
+    def _reachable_domain(self) -> str:
+        """Return the first launchd domain that answers, or an empty string."""
+        for domain in self._domains():
+            completed = run([LAUNCHCTL, "print", domain], check=False, capture=True)
+            if completed.returncode == 0:
+                return domain
+        return ""
 
     def _read_disabled_overrides(self) -> tuple[dict[str, bool], bool]:
         """Return ``({label: disabled}, overrides_known)``.

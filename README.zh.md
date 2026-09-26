@@ -88,7 +88,7 @@ uniservice --help                        # ……而且 `sudo uniservice ...` �
 所以受支持的 `/usr/local/bin/uniservice` 来源就两个：pipx 和安装器。
 
 卸载请用当初安装它的工具 —— `pipx uninstall uniservice` 或 `uv tool uninstall uniservice`。
-`uniservice uninstall` 不会碰不是自己装的副本，并会明确告诉你。
+`uniservice self uninstall` 不会碰不是自己装的副本，并会明确告诉你。
 
 ### 安装器参数
 
@@ -148,14 +148,38 @@ uniservice --help
 
 ## 使用
 
+```
+uniservice <command> [options]
+```
+
+| 命令 | 作用 |
+| --- | --- |
+| `list`、`ls` | 列出 uniservice 管理的服务 |
+| `add NAME -- COMMAND...` | 创建、启用并启动一个服务 |
+| `start`、`stop`、`restart NAME...` | 改变运行状态 |
+| `enable`、`disable NAME...` | 改变是否开机/登录自启 |
+| `remove`、`rm NAME...` | 停止、禁用并删除服务 |
+| `status [NAME]` | `NAME` 的原生状态；不带参数则是全部服务的表格 |
+| `logs NAME [-f]` | 打印捕获的输出 |
+| `show NAME` | 服务是怎么定义的，以及如何重建它 |
+| `self info`、`self uninstall` | 管理 uniservice 自身的安装 |
+| `doctor` | 端到端体检这台机器 |
+| `version` | 打印各组件版本 |
+
+所有控制类命令都接受**一个或多个**名字并逐个汇报，所以 `uniservice restart api worker` 是一条命令；
+只要其中任何一个失败，整体退出码就是非零。
+
+安装类命令放在 `self` 下面是有意的：`uniservice remove NAME` 删的是**服务**，`uniservice self uninstall`
+删的是 **uniservice 自己**。在命令树里把这件事说清楚，`uniservice --help` 才不会读起来像是两者平级。
+
 ### 作用域（macOS/Linux）
 
-作用域由你的权限决定，没有开关：
+作用域来自你的权限，而不是某个开关：
 
 | 运行方式 | 作用域 | 定义文件位置 |
 | --- | --- | --- |
-| `uniservice ...` | user（当前用户） | `~/.config/systemd/user/`、`~/Library/LaunchAgents/` |
-| `sudo uniservice ...` | system（整机） | `/etc/systemd/system/`、`/Library/LaunchDaemons/` |
+| `uniservice ...` | 用户级 | `~/.config/systemd/user/`、`~/Library/LaunchAgents/` |
+| `sudo uniservice ...` | 系统级 | `/etc/systemd/system/`、`/Library/LaunchDaemons/` |
 
 安装器把命令放进 `/usr/local/bin`（每个账号的 `PATH` 都包含它），所以两种用法都不需要额外设置。
 
@@ -173,10 +197,10 @@ Windows 没有 `sudo`：`uniservice list` 在普通终端即可运行，其它�
 uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 ```
 
-- 如果可执行文件不是全路径，uniservice 会尝试从 PATH 自动补全，并给出 WARNING。
+- 如果可执行文件不是全路径，uniservice 会从 PATH 解析它（用 `-v` 可以看到）。
 - 如果不设置 `--workdir`，默认使用当前目录执行命令。
 - 若同名服务已存在，会提示是否覆盖。
-- `add` 会执行 `enable` + `start`。
+- `add` 会执行 `enable` + `start`，然后打印命令、工作目录和它写下的定义文件。
 
 服务名不能包含 `/`、`\`、控制字符或 NUL，不能是 `.`/`..`，也不能以 `-` 开头（这些字符会逃出定义目录或破坏原生
 定义格式）。
@@ -184,10 +208,13 @@ uniservice add demo --workdir /tmp -- python3 -m http.server 8000
 ### list
 
 ```bash
-uniservice list
+uniservice list              # 终端里是表格，被重定向时是 TSV
+uniservice list --table      # 管道里也画表格：uniservice list --table | less
+uniservice list --json       # 机器可读
+uniservice list --quiet      # 只输出名字
 ```
 
-输出为 TSV（制表符分隔），按名称排序：
+表格有三列：
 
 | 列 | 含义 |
 | --- | --- |
@@ -196,45 +223,114 @@ uniservice list
 | `RUNNING` | 是否正在运行：`yes` / `no` / `?` |
 
 `?` 表示平台没有给出确定答案（例如缺少 `systemctl`、launchd 查询失败，或单元处于过渡状态），绝不会靠猜。
-名称中的控制字符会被替换、重复行会被合并，因此输出始终是合法的 TSV。
+名称中的控制字符会被替换、重复行会被合并，因此 TSV 形式始终合法。
+
+当 stdout 不是终端时，输出就是既有的制表符契约 `NAME<TAB>ENABLED<TAB>RUNNING`（含表头），所以已有脚本
+不需要任何改动。
 
 ### 控制
 
 ```bash
-uniservice enable  demo
 uniservice start   demo
 uniservice stop    demo
+uniservice restart demo        # 一次原生 restart，而不是 stop + start
+uniservice enable  demo        # 开机/登录自启
 uniservice disable demo
+uniservice restart api worker  # 一次操作多个
 ```
 
 ### 状态与日志
 
 ```bash
-uniservice status demo
-uniservice logs   demo --lines 200
-uniservice logs   demo --follow      # 或 -f
+uniservice status              # 全部服务的表格 + 一行汇总
+uniservice status demo         # 先是 uniservice 的结论，再是原生工具自己的输出
+uniservice logs   demo         # 最后 200 行
+uniservice logs   demo -n 50
+uniservice logs   demo -f      # 持续跟随
 ```
+
+`status NAME` 和 `logs NAME` 是故意把终端交给原生工具的：它的输出**就是**答案，重新排版 `systemctl status`
+或 `journalctl` 只会丢信息。
+
+### show
+
+```bash
+uniservice show demo
+```
+
+```
+demo · user scope
+  command   /usr/bin/python3 -m http.server 8000
+  workdir   /srv/demo
+  location  /home/me/.config/systemd/user/uniservice-demo.service
+
+recreate it with:
+  uniservice add demo --workdir /srv/demo -- /usr/bin/python3 -m http.server 8000
+```
+
+`--json` 给出同样的字段（含 `recreate`）。
 
 ### remove
 
 ```bash
 uniservice remove demo
+uniservice rm demo api         # 一次停止、禁用并删除多个
 ```
 
 `remove` 会先执行 `stop` + `disable` 再删除定义。
 
-### cat
+### self
 
 ```bash
-uniservice cat demo
+uniservice self info            # 这份命令装在哪、是怎么装的
+uniservice self uninstall       # 把它删掉
+uniservice self uninstall --dry-run
 ```
 
-打印一条等价的 `uniservice add ...` 命令。
+### doctor 与 version
+
+```bash
+uniservice doctor
+```
+
+```
+uniservice doctor
+  ✔ python           3.13.5 (/usr/bin/python3)
+  ✔ platform         linux (linux)
+  ✔ privileges       normal user · user scope
+  ✔ installation     not managed by install.sh; that is fine for pipx, uv or a source checkout
+  ✔ log file         /home/me/.uniservice/logs/uniservice.log
+  ✔ systemctl        /usr/bin/systemctl
+  ✔ journalctl       /usr/bin/journalctl
+  ✔ systemd manager  running (systemctl --user is-system-running)
+  ✔ unit directory   /home/me/.config/systemd/user
+
+all good
+```
+
+`doctor` 会检查解释器、平台、权限、安装方式和日志文件，然后让后端去探测原生监督器：systemd（包括
+`is-system-running`——在从未用 systemd 启动的容器里，正是这一项会失败）、launchd 的各个 domain，或任务计划程序。
+非致命项的失败（可选工具缺失、日志文件不可写）只作为警告汇报，不影响退出码。
+
+`uniservice version` 则打印各组件的版本，是往 issue 里粘贴用的。
+
+### 输出规则
+
+| 参数 | 效果 |
+| --- | --- |
+| `--color=auto\|always\|never` | 颜色；`auto` 表示终端、未设 `NO_COLOR` 且 `TERM` 不是 `dumb` |
+| `--ascii` | 用 ASCII 的 `v x -` 代替 `✔ ✘ • ─` |
+| `--json` | 在支持的命令上向 stdout 输出一份 JSON |
+| `-q`、`--quiet` | 只报错误；`list` 只输出名字 |
+| `-v`、`--verbose` | 在 stderr 上打开 debug 日志 |
+
+颜色与 Unicode 每次运行只判定一次：被重定向的 stdout 永远不会拿到 ANSI 转义，而使用旧代码页的 Windows 控制台
+会自动退回 ASCII 字符集。
 
 ## 日志
 
-- 控制台：WARNING 及以上
-- 文件：DEBUG 及以上
+- 控制台：WARNING 及以上（`-v` 降到 DEBUG），带 `uniservice:` 前缀
+- 文件：DEBUG 及以上，带时间戳
 - 日志文件：
   - macOS/Linux：`~/.uniservice/logs/uniservice.log`
   - Windows：`%LOCALAPPDATA%\uniservice\logs\uniservice.log`
@@ -244,16 +340,25 @@ uniservice cat demo
 ```
 uniservice                  可执行入口（很薄的启动器，也是 zipapp 运行的入口）
 uniservice_lib/
-  cli.py                    参数解析与命令分发
+  cli.py                    入口：解析、构造 Context、分发、退出码
+  parser.py                 命令树与分组帮助文本
+  console.py                展示层：tty/颜色/Unicode、表格、JSON
+  exitcodes.py              退出码常量
+  commands/
+    __init__.py             Context：console + scope + backend，以及权限规则
+    service.py              list、add、start/stop/restart、enable/disable、remove、status、logs、show
+    selfcmd.py              self info、self uninstall
+    diagnostics.py          doctor、version
   scope.py                  user / system 作用域
   naming.py                 服务名校验与原生定义名
   process.py                子进程封装
   platform_utils.py         平台与权限探测
   logging_utils.py          控制台 + 文件日志
   errors.py                 异常体系
+  installation.py           安装器留下的 manifest
   backends/
     __init__.py             后端选择
-    base.py                 Backend 接口、ServiceInfo、状态解析
+    base.py                 Backend 接口、ServiceInfo、ServiceDefinition、Check
     linux.py                systemd 单元
     macos.py                launchd 任务
     windows.py              计划任务
@@ -268,6 +373,10 @@ tests/                      pytest 测试（单元、端到端、安装器、可
 
 所有后端实现同一个 `Backend` 接口：新增平台只需要新增一个模块，并在
 `uniservice_lib/backends/__init__.py` 中注册。
+
+后端**返回数据**，由展示层负责渲染：`definition()` 描述一个服务，`checks()` 描述运行环境，
+`command_line()` 按该平台 shell 的规则拼命令行。只有 `status()` 和 `logs()` 会直接输出，因为那里原生工具
+自己的输出**就是**答案。
 
 ## 开发
 
@@ -310,8 +419,8 @@ sdist、zipapp、各平台二进制和 `SHA256SUMS`。
 `uniservice` 可以自己删掉自己：
 
 ```bash
-sudo uniservice uninstall        # 装在自定义前缀时直接：uniservice uninstall
-uniservice uninstall --dry-run   # 先看看会删什么
+sudo uniservice self uninstall        # 装在自定义前缀时直接：uniservice self uninstall
+uniservice self uninstall --dry-run   # 先看看会删什么
 ```
 
 它读取安装器写下的 manifest（`/usr/local/lib/uniservice/manifest`），只删除记录过的文件，并把因此

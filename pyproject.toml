@@ -39,8 +39,10 @@ uniservice = "uniservice_lib.cli:entrypoint"
 Homepage = "https://github.com/kevinhuang001/uniservice"
 Issues = "https://github.com/kevinhuang001/uniservice/issues"
 
-[tool.setuptools]
-packages = ["uniservice_lib", "uniservice_lib.backends"]
+[tool.setuptools.packages.find]
+# Discovered rather than listed: a new subpackage that is forgotten here would
+# ship a wheel whose console script cannot import it.
+include = ["uniservice_lib*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "uniservice_lib.__version__" }

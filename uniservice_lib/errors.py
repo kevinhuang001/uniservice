@@ -1,9 +1,10 @@
 """Exception hierarchy for uniservice.
 
 Every failure that is expected during normal operation is raised as a subclass
-of :class:`UniserviceError`.  The command line layer turns those into a single
-``FAIL: <message>`` line on stderr and a non-zero exit status, which keeps the
-backends free of ``print``/``sys.exit`` calls and makes them testable.
+of :class:`UniserviceError`.  The command line layer turns :class:`UsageError`
+into exit code 2 and anything else into exit code 1, printing one line on
+stderr, which keeps the backends free of ``print``/``sys.exit`` calls and makes
+them testable.
 """
 
 from __future__ import annotations
@@ -13,11 +14,16 @@ __all__ = [
     "ServiceNotFoundError",
     "UniserviceError",
     "UnsupportedPlatformError",
+    "UsageError",
 ]
 
 
 class UniserviceError(Exception):
     """Base class for user-facing uniservice failures."""
+
+
+class UsageError(UniserviceError):
+    """Raised when the command line itself is wrong (exit code 2)."""
 
 
 class ServiceNotFoundError(UniserviceError):

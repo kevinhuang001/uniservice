@@ -6,7 +6,7 @@ install:
     <prefix>/bin/uniservice          the command
     <prefix>/lib/uniservice/manifest what was installed
 
-``uniservice uninstall`` reads it back and removes exactly those files, which is
+``uniservice self uninstall`` reads it back and removes exactly those files, which is
 the same contract ``install.sh --uninstall`` implements for the case where the
 command itself is broken or already gone.
 """
@@ -192,7 +192,7 @@ def _unlink(path: Path) -> None:
     try:
         path.unlink()
     except PermissionError as exc:
-        raise UniserviceError(f"cannot remove {path} ({exc.strerror}); run 'sudo {path.name} uninstall'") from None
+        raise UniserviceError(f"cannot remove {path} ({exc.strerror}); run 'sudo {path.name} self uninstall'") from None
     except OSError as exc:
         raise UniserviceError(f"cannot remove {path}: {exc}") from None
 

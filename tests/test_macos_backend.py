@@ -400,7 +400,7 @@ def test_create_still_records_where_the_new_logs_go(
     assert data["StandardErrorPath"] == str(err_path)
 
 
-def test_cat_round_trips_the_add_command(
+def test_definition_round_trips_the_plist(
     backend: MacOSBackend,
     plist_root: Path,
     tmp_path: Path,
@@ -411,17 +411,18 @@ def test_cat_round_trips_the_add_command(
     fake_runner(macos)
     backend.create("demo", workdir, ["/usr/bin/python3", "-m", "http.server", "8000"])
 
-    backend.cat("demo")
+    definition = backend.definition("demo")
 
-    output = capsys.readouterr().out.strip()
-    assert output.startswith("uniservice add demo --workdir ")
-    assert str(workdir) in output
-    assert output.endswith("-- /usr/bin/python3 -m http.server 8000")
+    assert definition.name == "demo"
+    assert definition.scope == "user"
+    assert definition.workdir == str(workdir)
+    assert definition.command_parts == ("/usr/bin/python3", "-m", "http.server", "8000")
+    assert definition.location.endswith("com.uniservice.demo.plist")
 
 
-def test_cat_rejects_a_missing_service(backend: MacOSBackend, plist_root: Path) -> None:
+def test_definition_rejects_a_missing_service(backend: MacOSBackend, plist_root: Path) -> None:
     with pytest.raises(ServiceNotFoundError):
-        backend.cat("nope")
+        backend.definition("nope")
 
 
 def test_exists_reflects_the_plist(backend: MacOSBackend, plist_root: Path) -> None:
@@ -603,3 +604,44 @@ def test_remove_deletes_the_plist(
     backend.remove("demo")
 
     assert not plist_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# doctor checks
+# ---------------------------------------------------------------------------
+
+
+def test_checks_report_a_reachable_domain(
+    backend: MacOSBackend,
+    plist_root: Path,
+    fake_runner: Callable[..., FakeRunner],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("uniservice_lib.backends.base.shutil.which", lambda name: f"/usr/bin/{name}")
+    runner = fake_runner(macos)
+    runner.add_command("launchctl", "print", "gui/", stdout="gui/501\n")
+
+    checks = {check.label: check for check in backend.checks()}
+
+    assert checks["launchctl"].ok
+    assert checks["pgrep"].ok
+    assert checks["plist directory"].ok
+    assert checks["launchd domain"].ok
+
+
+def test_checks_fail_without_a_domain(
+    backend: MacOSBackend,
+    plist_root: Path,
+    fake_runner: Callable[..., FakeRunner],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("uniservice_lib.backends.base.shutil.which", lambda name: None)
+    runner = fake_runner(macos)
+    # Neither domain answers, so the loop falls through to an empty result.
+    runner.add_command("launchctl", "print", returncode=1, stderr="Could not find domain")
+
+    checks = {check.label: check for check in backend.checks()}
+
+    assert checks["launchctl"].ok is False
+    assert checks["launchd domain"].ok is False
+    assert checks["launchd domain"].fatal is True

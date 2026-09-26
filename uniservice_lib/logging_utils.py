@@ -23,6 +23,9 @@ FILE_LEVEL = logging.DEBUG
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
 
+#: The console shows a short prefix; the log file keeps the timestamp.
+_CONSOLE_FORMAT = "uniservice: %(message)s"
+
 
 def eprint(*args: object) -> None:
     """Print *args* to stderr."""
@@ -37,24 +40,27 @@ def log_path() -> Path:
     return Path.home() / ".uniservice" / "logs" / "uniservice.log"
 
 
-def setup_logging() -> None:
+_console_handler = logging.StreamHandler(stream=sys.stderr)
+
+
+def setup_logging(*, verbose: bool = False) -> None:
     """Install the console and file handlers on the uniservice logger.
 
     The function is idempotent: calling it twice does not duplicate handlers.
-    A log file that cannot be created is reported once but never prevents the
-    command from running.
+    ``verbose`` (``uniservice -v``) turns the console handler down to DEBUG,
+    which is how a single failing command is diagnosed without hunting for the
+    log file.  A log file that cannot be created is reported once but never
+    prevents the command from running.
     """
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
+    _console_handler.setLevel(logging.DEBUG if verbose else CONSOLE_LEVEL)
+    _console_handler.setFormatter(logging.Formatter(_CONSOLE_FORMAT))
     if logger.handlers:
         return
 
-    formatter = logging.Formatter(_LOG_FORMAT)
-
-    console = logging.StreamHandler(stream=sys.stderr)
-    console.setLevel(CONSOLE_LEVEL)
-    console.setFormatter(formatter)
-    logger.addHandler(console)
+    logger.addHandler(_console_handler)
+    _console_handler.setStream(sys.stderr)
 
     try:
         path = log_path()
@@ -65,5 +71,5 @@ def setup_logging() -> None:
         return
 
     file_handler.setLevel(FILE_LEVEL)
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
     logger.addHandler(file_handler)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -15,7 +16,7 @@ CLI_PATH = REPO_ROOT / "uniservice"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from uniservice_lib.backends.base import ServiceInfo  # noqa: E402
+from uniservice_lib.backends.base import Check, ServiceDefinition, ServiceInfo  # noqa: E402
 from uniservice_lib.logging_utils import logger  # noqa: E402
 
 
@@ -107,8 +108,22 @@ class FakeBackend:
     def create(self, name: str, workdir: Path, command_parts: list[str]) -> None:
         self._record("create", name, workdir, list(command_parts))
 
-    def cat(self, name: str) -> None:
-        self._record("cat", name)
+    def definition(self, name: str) -> ServiceDefinition:
+        self._record("definition", name)
+        return ServiceDefinition(
+            name=name,
+            scope=self.scope.value if self.scope is not None else "user",
+            location=f"/fake/{name}.unit",
+            workdir="/tmp",
+            command_parts=("/usr/bin/env", "true"),
+        )
+
+    def command_line(self, parts: Iterable[str]) -> str:
+        return " ".join(str(part) for part in parts)
+
+    def checks(self) -> list[Check]:
+        self._record("checks")
+        return []
 
     def status(self, name: str) -> None:
         self._record("status", name)
@@ -131,6 +146,9 @@ class FakeBackend:
 
     def stop(self, name: str) -> None:
         self._record("stop", name)
+
+    def restart(self, name: str) -> None:
+        self._record("restart", name)
 
     def remove(self, name: str) -> None:
         self._record("remove", name)
@@ -199,5 +217,37 @@ def fake_which(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
 @pytest.fixture
 def cli_privileges(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the CLI believe it runs with sufficient privileges on any host."""
-    monkeypatch.setattr("uniservice_lib.cli.is_root_unix", lambda: True)
-    monkeypatch.setattr("uniservice_lib.cli.is_admin_windows", lambda: True)
+    monkeypatch.setattr("uniservice_lib.commands.is_root_unix", lambda: True)
+    monkeypatch.setattr("uniservice_lib.commands.is_admin_windows", lambda: True)
+
+
+class TtyStream(io.StringIO):
+    """A stream that claims to be a terminal, so tables are rendered."""
+
+    encoding = "utf-8"
+
+    def isatty(self) -> bool:
+        return True
+
+
+@pytest.fixture
+def tty(monkeypatch: pytest.MonkeyPatch) -> TtyStream:
+    """Give the CLI a fake terminal as its output stream.
+
+    ``sys.stdout`` cannot be monkeypatched here: pytest re-installs its own
+    capture object for the call phase, *after* fixtures have run, so the CLI
+    would never see the replacement.  Swapping the console factory instead is
+    immune to that.
+    """
+    from uniservice_lib import cli as cli_module
+
+    stream = TtyStream()
+    real = cli_module.Console
+
+    def factory(**kwargs: object) -> object:
+        kwargs["stdout"] = stream
+        kwargs.setdefault("stderr", stream)
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli_module, "Console", factory)
+    return stream
