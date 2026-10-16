@@ -217,6 +217,9 @@ Windows uses Scheduled Tasks managed via `schtasks.exe`.
   - Account: `/RU SYSTEM`
   - Privilege: `/RL HIGHEST`
   - Action: `/TR "<cmd>"` (typically wraps `cmd.exe /c "cd /d <workdir> && <command>"` to set working directory)
+- Create `%ProgramData%\uniservice\logs\services` before registering the task.  The action redirects
+  stdout/stderr into that directory, and `cmd.exe` fails the whole action with "The system cannot find
+  the path specified." when the directory is missing, so the command would never run.
 - Admin privileges are required to create ONSTART + SYSTEM tasks.
 
 ### enable / disable
@@ -272,3 +275,5 @@ Windows uses Scheduled Tasks managed via `schtasks.exe`.
   - `%ProgramData%\uniservice\logs\services\NAME.out.log`
   - `%ProgramData%\uniservice\logs\services\NAME.err.log`
 - `logs --follow` tails the log files via PowerShell `Get-Content -Wait`.
+- A stream with no file yet (the service has not written anything) is reported as empty; the missing path
+  is not passed to `Get-Content`, which would print a PowerShell error instead of log lines.
