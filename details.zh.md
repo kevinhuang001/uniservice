@@ -203,6 +203,8 @@ Windows 上用计划任务实现托管，通过 `schtasks.exe` 管理任务。
   - 运行账号：`/RU SYSTEM`
   - 权限：`/RL HIGHEST`
   - 动作：`/TR "<cmd>"`（通常包一层 `cmd.exe /c "cd /d <workdir> && <command>"` 以设置工作目录）
+- 注册任务前先创建 `%ProgramData%\uniservice\logs\services`。动作会把 stdout/stderr 重定向到该目录，
+  目录不存在时 `cmd.exe` 会以“系统找不到指定的路径。”直接失败整个动作，命令根本不会被执行。
 - 通常需要管理员权限（否则无法创建 ONSTART + SYSTEM 的任务）。
 
 ### enable / disable
@@ -255,3 +257,5 @@ Windows 上用计划任务实现托管，通过 `schtasks.exe` 管理任务。
   - `%ProgramData%\uniservice\logs\services\NAME.out.log`
   - `%ProgramData%\uniservice\logs\services\NAME.err.log`
 - `logs --follow` 会用 PowerShell `Get-Content -Wait` 跟随输出。
+- 若某个流还没有对应文件（服务尚未产生任何输出），会直接提示为空，而不会把不存在的路径交给
+  `Get-Content`（那样只会打印 PowerShell 报错）。

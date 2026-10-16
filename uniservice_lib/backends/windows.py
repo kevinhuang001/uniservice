@@ -236,6 +236,7 @@ class WindowsBackend(Backend):
         self._require_admin()
         # A re-created task must not inherit the previous one's captured output.
         log_dir = win_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
         clear_files(log_dir / f"{name}.out.log", log_dir / f"{name}.err.log")
         run(
             [
@@ -307,18 +308,25 @@ class WindowsBackend(Backend):
         log_dir = win_log_dir()
         out_path = log_dir / f"{name}.out.log"
         err_path = log_dir / f"{name}.err.log"
+        # A service that has not written anything yet has no files at all, and
+        # Get-Content reports a missing path as an error rather than an empty log.
+        present = [path for path in (out_path, err_path) if path.exists()]
+        if not present:
+            print(f"==> {out_path} <==\n(no output captured yet)")
+            return
         if follow:
+            paths = ",".join(f"'{path}'" for path in present)
             run(
                 [
                     POWERSHELL,
                     "-NoProfile",
                     "-Command",
-                    f"Get-Content -LiteralPath @('{out_path}','{err_path}') -Tail {lines} -Wait",
+                    f"Get-Content -LiteralPath @({paths}) -Tail {lines} -Wait",
                 ],
                 check=False,
             )
         else:
-            for path in (out_path, err_path):
+            for path in present:
                 # Label the file: the two dumps are otherwise indistinguishable.
                 print(f"==> {path} <==")
                 run(

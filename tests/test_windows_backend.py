@@ -444,6 +444,23 @@ def test_create_clears_the_previous_incarnations_logs(
     assert keeper.read_text(encoding="utf-8") == "not ours\n"
 
 
+def test_create_makes_the_log_directory(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_runner: Callable[..., FakeRunner],
+    tmp_path: Path,
+) -> None:
+    """cmd.exe aborts the task action when the redirection target is missing."""
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    fake_runner(windows)
+    assert not win_log_dir().exists()
+
+    backend.create("demo", Path("C:/work"), ["C:/python.exe"])
+
+    assert win_log_dir().is_dir()
+
+
 def test_status_uses_the_verbose_listing(
     backend: WindowsBackend,
     monkeypatch: pytest.MonkeyPatch,
@@ -467,11 +484,14 @@ def test_logs_reads_stdout_and_stderr(
     monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
     monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
     runner = fake_runner(windows)
+    log_dir = tmp_path / "uniservice" / "logs" / "services"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "demo.out.log").write_text("out\n", encoding="utf-8")
+    (log_dir / "demo.err.log").write_text("err\n", encoding="utf-8")
 
     backend.logs("demo", lines=15, follow=False)
     captured = capsys.readouterr()
 
-    log_dir = tmp_path / "uniservice" / "logs" / "services"
     scripts = [command[-1] for command in runner.calls]
     assert any(str(log_dir / "demo.out.log") in script and "-Tail 15" in script for script in scripts)
     assert any(str(log_dir / "demo.err.log") in script and "-Tail 15" in script for script in scripts)
@@ -490,11 +510,76 @@ def test_logs_follow_waits_for_new_lines(
     monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
     monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
     runner = fake_runner(windows)
+    log_dir = win_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "demo.out.log").write_text("out\n", encoding="utf-8")
+    (log_dir / "demo.err.log").write_text("err\n", encoding="utf-8")
 
     backend.logs("demo", lines=15, follow=True)
 
     scripts = [command[-1] for command in runner.calls]
     assert any("-Wait" in script and "-Tail 15" in script for script in scripts)
+
+
+def test_logs_reports_a_service_that_never_wrote_anything(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_runner: Callable[..., FakeRunner],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing file must not reach Get-Content, which reports it as an error."""
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    runner = fake_runner(windows)
+
+    backend.logs("demo", lines=15, follow=False)
+
+    assert runner.calls == []
+    assert "no output captured yet" in capsys.readouterr().out
+
+
+def test_logs_skips_a_stream_without_a_file(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_runner: Callable[..., FakeRunner],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    runner = fake_runner(windows)
+    log_dir = win_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "demo.out.log").write_text("out\n", encoding="utf-8")
+
+    backend.logs("demo", lines=15, follow=False)
+
+    (script,) = [command[-1] for command in runner.calls]
+    assert "demo.out.log" in script
+    assert "demo.err.log" not in script
+    assert "demo.err.log" not in capsys.readouterr().out
+
+
+def test_logs_follow_tails_only_the_files_that_exist(
+    backend: WindowsBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_runner: Callable[..., FakeRunner],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(windows, "is_admin_windows", lambda: True)
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    runner = fake_runner(windows)
+    log_dir = win_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "demo.err.log").write_text("err\n", encoding="utf-8")
+
+    backend.logs("demo", lines=15, follow=True)
+
+    (script,) = [command[-1] for command in runner.calls]
+    assert "-Wait" in script
+    assert "demo.err.log" in script
+    assert "demo.out.log" not in script
 
 
 def test_enable_and_disable_change_the_task_state(

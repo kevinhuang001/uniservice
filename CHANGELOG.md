@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Windows:** `add` now creates `%ProgramData%\uniservice\logs\services` before registering the task.
+  The action redirects stdout/stderr into that directory, and `cmd.exe` aborts the whole action with
+  "The system cannot find the path specified." when it is missing.  The task therefore reported a last
+  result of `1`, the command never ran, and no log file was ever written - which also made `logs` look
+  like it was broken rather than empty.
+- **Windows:** `logs` reports a stream that has no captured output yet instead of handing the missing
+  path to `Get-Content`, which answered with a PowerShell `PathNotFound` error where log lines belong.
+
 ## [2.1.0] - 2026-09-21
 
 ### Removed
